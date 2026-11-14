@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { adjustmentFeedXml, checkRefund, feedAmount, parseProcessingReport, refundBlocker, type AmazonOrderView } from "../../packages/core/amazon-refund.ts";
+import { adjustmentFeedXml, checkRefund, feedAmount, parseProcessingReport, percentAmounts, refundBlocker, type AmazonOrderView } from "../../packages/core/amazon-refund.ts";
 import { parseOrder } from "../../packages/connectors/amazon/refunds.ts";
 
 // Synthetic order only.
@@ -59,5 +59,17 @@ describe("Amazon-Erstattung (Order Adjustment)", () => {
     );
     assert.deepEqual(v.items[0], { orderItemId: "1", sku: "S", asin: undefined, title: "T", quantity: 2, itemPriceCents: 1990, shippingPriceCents: 490, promotionDiscountCents: 0 });
     assert.equal(v.fulfillmentChannel, "AFN");
+  });
+
+  it("computes a percentage of the paid item price, capped at what is left", () => {
+    const items = order.items.map((i) => ({ ...i, refundablePrincipalCents: i.itemPriceCents - i.promotionDiscountCents }));
+    assert.deepEqual(percentAmounts(items, 20), { "11111111111111": 796, "22222222222222": 160 });
+    assert.deepEqual(percentAmounts(items, 12.5), { "11111111111111": 498, "22222222222222": 100 });
+    // Earlier refund leaves only 1,00 € for A.
+    assert.equal(percentAmounts([{ ...items[0]!, refundablePrincipalCents: 100 }], 50)!["11111111111111"], 100);
+    for (const bad of [0, -5, 101, Number.NaN]) assert.equal(percentAmounts(items, bad), null);
+    // The result passes the server check.
+    const p = percentAmounts(items, 20)!;
+    assert.equal(checkRefund(order, Object.entries(p).map(([orderItemId, principalCents]) => ({ orderItemId, principalCents, shippingCents: 0 })), []).ok, true);
   });
 });

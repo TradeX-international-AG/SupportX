@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, fmtDate } from "./api.ts";
 import { amazonMarketplaceLabel } from "../../../packages/core/amazon-marketplaces.ts";
-import { AMAZON_ORDER_ID, AMAZON_REFUND_REASONS, formatCents } from "../../../packages/core/amazon-refund.ts";
+import { AMAZON_ORDER_ID, AMAZON_REFUND_REASONS, formatCents, percentAmounts } from "../../../packages/core/amazon-refund.ts";
 import { parseAmountInput } from "../../../packages/core/refund-list.ts";
 
 export interface MarketplaceRefund {
@@ -51,6 +51,7 @@ export function AmazonRefundCard({ base, caseId, orderIds, suggestedCents, refun
   const [view, setView] = useState<OrderView | null>(null);
   const [amounts, setAmounts] = useState<Record<string, { principal: string; shipping: string }>>({});
   const [reason, setReason] = useState<string>("CustomerReturn");
+  const [percent, setPercent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: string; text: string } | null>(null);
@@ -68,6 +69,13 @@ export function AmazonRefundCard({ base, caseId, orderIds, suggestedCents, refun
     setView(v);
     setAmounts(Object.fromEntries(v.items.map((i) => [i.orderItemId, { principal: "", shipping: "" }])));
   });
+  const pct = Number(percent.trim().replace(",", ".").replace(/\s*%$/, ""));
+  const byPercent = view && percent.trim() ? percentAmounts(view.items, pct) : null;
+  const fillPercent = () => {
+    if (!view || !byPercent) return;
+    setAmounts(Object.fromEntries(view.items.map((i) => [i.orderItemId, { principal: byPercent[i.orderItemId] ? input(byPercent[i.orderItemId]!) : "", shipping: "" }])));
+    setReason("GeneralAdjustment");
+  };
   const fillAll = () => view && setAmounts(Object.fromEntries(view.items.map((i) => [i.orderItemId, { principal: i.refundablePrincipalCents ? input(i.refundablePrincipalCents) : "", shipping: i.refundableShippingCents ? input(i.refundableShippingCents) : "" }])));
 
   const parsed = view?.items.map((i) => {
@@ -155,6 +163,10 @@ export function AmazonRefundCard({ base, caseId, orderIds, suggestedCents, refun
             <>
               <div className="row wrap">
                 <button onClick={fillAll} disabled={busy}>Alles erstatten</button>
+                <label className="row small">Prozent vom Artikelpreis
+                  <input className={`pct-input${percent.trim() && !byPercent ? " invalid" : ""}`} inputMode="decimal" value={percent} onChange={(e) => setPercent(e.target.value)} placeholder="z. B. 20" aria-label="Prozent vom Artikelpreis" />
+                </label>
+                <button onClick={fillPercent} disabled={busy || !byPercent}>{byPercent ? `${percent.trim().replace(/\s*%$/, "")} % eintragen` : "% eintragen"}</button>
                 {suggestedCents ? <span className="muted small">Laut Fall: {formatCents(suggestedCents, view.order.currency)}</span> : null}
               </div>
               <label>Grund

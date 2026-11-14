@@ -168,3 +168,16 @@ export function parseProcessingReport(text: string): ProcessingReport | null {
     .slice(0, 5);
   return { processed: n("MessagesProcessed"), successful: n("MessagesSuccessful"), withError: n("MessagesWithError"), messages };
 }
+
+/**
+ * Partial refund as a percentage of the item price paid (after promotions), per
+ * item, rounded to the cent and never above what is still refundable. Shipping
+ * is not included. Returns cents per order item id; null for an invalid percent.
+ */
+export function percentAmounts(items: ReadonlyArray<Pick<AmazonOrderItem, "orderItemId" | "itemPriceCents" | "promotionDiscountCents"> & { refundablePrincipalCents: number }>, percent: number): Record<string, number> | null {
+  if (!Number.isFinite(percent) || percent <= 0 || percent > 100) return null;
+  return Object.fromEntries(items.map((i) => {
+    const paid = Math.max(0, i.itemPriceCents - i.promotionDiscountCents);
+    return [i.orderItemId, Math.min(i.refundablePrincipalCents, Math.round((paid * percent) / 100))];
+  }));
+}
