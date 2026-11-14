@@ -47,7 +47,8 @@ import { draftInvoiceReply, fetchCaseInvoices } from "../../packages/services/in
 import { deleteLogo, getLogo, logoVersion, previewDesign, resetDesign, saveDesign, saveLogo, workspaceTheme } from "../../packages/services/design.ts";
 import { writeDesignMd, type WorkspaceTheme } from "../../packages/core/design-md.ts";
 import { checkDhlConnection, deleteDhlConnection, getDhlSettings, saveDhlConnection, trackCaseParcels } from "../../packages/services/dhl-tracking.ts";
-import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection } from "../../packages/services/amazon-listings.ts";
+import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection, setAmazonRefundsEnabled } from "../../packages/services/amazon-listings.ts";
+import { checkAmazonRefund, issueAmazonRefund, lookupAmazonRefundOrder, settleUncertainAmazonRefund } from "../../packages/services/amazon-refunds.ts";
 import { batchCandidates, sendMany } from "../../packages/services/batch.ts";
 import { supportReport } from "../../packages/services/reports.ts";
 import { addToRefundList, listRefunds, removeFromRefundList, setRefundDetails, setRefundDone } from "../../packages/services/refunds.ts";
@@ -323,6 +324,32 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     const body = parse(z.object({ force: z.boolean().optional() }), req.body ?? {});
     return trackCaseParcels(ctx, await actor(req), (req.params as { id: string }).id, body);
   });
+  // Amazon refund from the case: read the order first, send only with the dialog's confirmation and total.
+  const amazonOrderId = z.string().min(19).max(19);
+  app.post("/api/w/:ws/cases/:id/amazon-refund/lookup", async (req) => {
+    const body = parse(z.object({ orderId: amazonOrderId }), req.body);
+    return lookupAmazonRefundOrder(ctx, await actor(req), (req.params as { id: string }).id, body);
+  });
+  app.post("/api/w/:ws/cases/:id/amazon-refund", async (req) => {
+    const body = parse(
+      z.object({
+        orderId: amazonOrderId, reason: z.string().max(40), confirm: z.literal(true), expectedTotalCents: z.number().int().positive(),
+        lines: z.array(z.object({ orderItemId: z.string().min(1).max(40), principal: z.string().max(20).optional(), shipping: z.string().max(20).optional() })).min(1).max(100),
+      }),
+      req.body,
+    );
+    return issueAmazonRefund(ctx, await actor(req), (req.params as { id: string }).id, body);
+  });
+  app.post("/api/w/:ws/cases/:id/amazon-refund/:refundId/check", async (req) => {
+    const p = req.params as { id: string; refundId: string };
+    return checkAmazonRefund(ctx, await actor(req), p.id, p.refundId);
+  });
+  app.post("/api/w/:ws/cases/:id/amazon-refund/:refundId/settle", async (req) => {
+    const p = req.params as { id: string; refundId: string };
+    const body = parse(z.object({ confirm: z.literal(true), outcome: z.enum(["refunded", "not_refunded"]) }), req.body);
+    await settleUncertainAmazonRefund(ctx, await actor(req), p.id, p.refundId, body);
+    return { ok: true };
+  });
   app.post("/api/w/:ws/cases/:id/redraft", async (req) => {
     const body = parse(z.object({ decision: z.enum(["customer_right", "customer_wrong", "ask_customer"]) }), req.body);
     await requestRedraft(ctx, await actor(req), (req.params as { id: string }).id, body.decision);
@@ -471,6 +498,10 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
   });
   app.delete("/api/w/:ws/amazon-listings", async (req) => {
     await deleteAmazonListingConnection(ctx, await actor(req));
+    return { ok: true };
+  });
+  app.put("/api/w/:ws/amazon-listings/refunds", async (req) => {
+    await setAmazonRefundsEnabled(ctx, await actor(req), parse(z.object({ enabled: z.boolean() }), req.body).enabled);
     return { ok: true };
   });
   app.post("/api/w/:ws/amazon-listings/check", async (req) => checkAmazonListingConnection(ctx, await actor(req)));

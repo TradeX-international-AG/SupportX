@@ -11,6 +11,8 @@ import { formatKg, weightChecks, WEIGHT_SOURCE_NOTE } from "../../../packages/co
 import { buildTimeline } from "../../../packages/core/timeline.ts";
 import { ParcelTrackingCard } from "./DhlTracking.tsx";
 import { AmazonOfferCard, LISTING_STATE, listingActionText, type ListingAction } from "./AmazonOffer.tsx";
+import { AmazonRefundCard, type MarketplaceRefund } from "./AmazonRefund.tsx";
+import { AMAZON_ORDER_ID } from "../../../packages/core/amazon-refund.ts";
 import { RETURN_STATUS_DE, returnSummary, type ReturnFact, type ReturnSummary } from "../../../packages/core/returns.ts";
 import type { RefundDue } from "../../../packages/core/refund-due.ts";
 import { formatMoney, type ReturnCheck } from "../../../packages/core/return-check.ts";
@@ -76,7 +78,9 @@ interface CaseData {
   /** Amazon offers closed (or tried) from this case. */
   listingActions?: ListingAction[];
   /** Set when the workspace has an Amazon SP-API access: the marketplaces it may change. */
-  amazonListings?: { marketplaceIds: string[] } | null;
+  amazonListings?: { marketplaceIds: string[]; refundsEnabled?: boolean } | null;
+  /** Refunds triggered at a marketplace from this case. */
+  marketplaceRefunds?: MarketplaceRefund[];
   /** Goods back in weclapp and no refund recorded yet: the refund is to be done. */
   refund?: RefundDue;
   /** Returned quantities and amounts checked against the order (null when there is nothing to check). */
@@ -91,6 +95,13 @@ const AUDIT_LABEL: Record<string, string> = {
   "amazon.offer_close_accepted": "Amazon-Angebot deaktiviert (von Amazon angenommen)",
   "amazon.offer_close_rejected": "Amazon-Angebot deaktivieren: von Amazon abgelehnt",
   "amazon.offer_close_uncertain": "Amazon-Angebot deaktivieren: Antwort unklar",
+  "amazon.refund_submitted": "Erstattung an Amazon übergeben",
+  "amazon.refund_accepted": "Erstattung von Amazon verarbeitet",
+  "amazon.refund_rejected": "Erstattung von Amazon abgelehnt",
+  "amazon.refund_uncertain": "Erstattung bei Amazon: Antwort unklar",
+  "amazon.refund_failed": "Erstattung bei Amazon: nicht gesendet",
+  "amazon.refund_confirmed_manually": "Unklare Erstattung: in Seller Central als erstattet bestätigt",
+  "amazon.refund_dismissed": "Unklare Erstattung: in Seller Central geprüft, nicht erstattet",
 };
 
 const KIND_LABEL: Record<string, string> = { customer: "Kunde", echo: "unsere Antwort", manual_external: "außerhalb gesendet", platform_notice: "Systemhinweis" };
@@ -103,6 +114,13 @@ const CASE_STATUS = [
   { value: "waiting", label: "Wartet" },
   { value: "closed", label: "Erledigt" },
 ] as const;
+
+/** Amazon order numbers known for the case: from weclapp first, then what the mail names. */
+function amazonOrderIds(data: CaseData): string[] {
+  const refs = (data.conversation.order_references ?? []) as Array<string | { value?: string }>;
+  const fromErp = data.orderLink?.status === "unique" ? data.orderLink.snapshot?.orderNumberAtCustomer : undefined;
+  return [...new Set([fromErp, ...refs.map((r) => (typeof r === "string" ? r : r?.value))].map((v) => v?.trim()).filter((v): v is string => !!v && AMAZON_ORDER_ID.test(v)))];
+}
 
 type HistoryCase = { id: string; subject: string; topic: string | null; status: string; outcome: string | null; source_platform: string; last_message_at: string | null; order_number: string | null };
 
@@ -380,6 +398,18 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
               marketplaceIds={data.amazonListings.marketplaceIds}
               skus={[...new Set((data.orderLink?.status === "unique" ? data.orderLink.snapshot?.lines ?? [] : []).map((l) => l.articleNumber).filter((x): x is string => !!x))]}
               actions={data.listingActions ?? []}
+              canEdit={canEdit}
+              onDone={() => { void load(); onChanged(); }}
+            />
+          )}
+          {data.amazonListings?.refundsEnabled && (c.source_platform === "amazon" || amazonOrderIds(data).length > 0 || (data.marketplaceRefunds?.length ?? 0) > 0) && (
+            <AmazonRefundCard
+              key={`refund-${caseId}`}
+              base={base}
+              caseId={caseId}
+              orderIds={amazonOrderIds(data)}
+              suggestedCents={data.refundList?.item?.amount?.cents ?? null}
+              refunds={data.marketplaceRefunds ?? []}
               canEdit={canEdit}
               onDone={() => { void load(); onChanged(); }}
             />

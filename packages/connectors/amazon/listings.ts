@@ -1,5 +1,6 @@
 import type { AmazonRegion } from "../../core/amazon-marketplaces.ts";
 import { assertAllowedEndpoint, HttpError, requestJson } from "../http.ts";
+import { LwaToken } from "./lwa.ts";
 
 /**
  * Amazon Selling Partner API, Listings Items API v2021-08-01, for one action:
@@ -18,8 +19,8 @@ import { assertAllowedEndpoint, HttpError, requestJson } from "../http.ts";
  */
 
 export const LISTINGS_VERSION = "2021-08-01";
-const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
-const REGION_HOSTS: Record<AmazonRegion, string> = {
+export const LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token";
+export const REGION_HOSTS: Record<AmazonRegion, string> = {
   eu: "https://sellingpartnerapi-eu.amazon.com",
   na: "https://sellingpartnerapi-na.amazon.com",
   fe: "https://sellingpartnerapi-fe.amazon.com",
@@ -143,7 +144,7 @@ export class AmazonListingsClient {
   readonly #c: AmazonListingsConfig;
   readonly #api: URL;
   readonly #token: URL;
-  #access: { token: string; expiresAt: number } | null = null;
+  readonly #lwa: LwaToken;
 
   constructor(config: AmazonListingsConfig) {
     if (!config.sellerId.trim() || !config.clientId.trim() || !config.clientSecret || !config.refreshToken) throw new Error("Amazon-Zugangsdaten unvollständig.");
@@ -151,6 +152,7 @@ export class AmazonListingsClient {
     this.#c = config;
     this.#api = assertAllowedEndpoint(config.apiBaseUrl ?? REGION_HOSTS[config.region], config.allowTestEndpoints, isOfficialAmazonHost);
     this.#token = assertAllowedEndpoint(config.tokenUrl ?? LWA_TOKEN_URL, config.allowTestEndpoints, isOfficialAmazonHost);
+    this.#lwa = new LwaToken({ tokenUrl: this.#token, clientId: config.clientId, clientSecret: config.clientSecret, refreshToken: config.refreshToken, timeoutMs: config.timeoutMs ?? 15_000, fetchImpl: config.fetchImpl });
   }
 
   get #timeout(): number {
@@ -158,23 +160,7 @@ export class AmazonListingsClient {
   }
 
   async #accessToken(): Promise<string> {
-    if (this.#access && this.#access.expiresAt > Date.now() + 60_000) return this.#access.token;
-    const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: this.#c.refreshToken, client_id: this.#c.clientId, client_secret: this.#c.clientSecret }).toString();
-    let res: unknown;
-    try {
-      res = await requestJson(this.#token, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body, timeoutMs: this.#timeout, fetchImpl: this.#c.fetchImpl });
-    } catch (error) {
-      if (error instanceof HttpError && (error.status === 400 || error.status === 401)) {
-        // Not a send: a failed token request never changed anything at Amazon.
-        throw new HttpError(`Anmeldung bei Amazon fehlgeschlagen: Client-ID, Client-Secret oder Refresh-Token passen nicht (${error.message}).`, error.status, false, false);
-      }
-      throw new HttpError(error instanceof Error ? error.message : String(error), error instanceof HttpError ? error.status : 0, true, false);
-    }
-    const token = str(rec(res).access_token);
-    if (!token) throw new HttpError("Amazon lieferte kein Zugriffstoken.", 502, false);
-    const expiresIn = typeof rec(res).expires_in === "number" ? (rec(res).expires_in as number) : 3600;
-    this.#access = { token, expiresAt: Date.now() + expiresIn * 1000 };
-    return token;
+    return this.#lwa.get();
   }
 
   #itemUrl(sku: string, params: Record<string, string>): URL {

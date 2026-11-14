@@ -84,7 +84,7 @@ describe("Amazon-Angebot aus dem Fall deaktivieren", () => {
     const { h, amz, s, caseId } = await setup();
     await code(lookupAmazonListing(h.ctx, s.agent, caseId, { sku: "TEST-SKU-1", marketplaceId: DE }), "NOT_CONNECTED");
     await connect(h, amz, s);
-    assert.deepEqual((await getCase(h.ctx, s.agent, caseId)).amazonListings, { marketplaceIds: [DE] });
+    assert.deepEqual((await getCase(h.ctx, s.agent, caseId)).amazonListings, { marketplaceIds: [DE], refundsEnabled: false });
 
     const listing = await lookupAmazonListing(h.ctx, s.agent, caseId, { sku: "TEST-SKU-1", marketplaceId: DE });
     assert.equal(listing.asin, "B0TEST0001");

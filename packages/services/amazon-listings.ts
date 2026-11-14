@@ -1,6 +1,7 @@
 import { AMAZON_MARKETPLACES, amazonMarketplace, maskIdentifier, type AmazonRegion } from "../core/amazon-marketplaces.ts";
 import { AmazonListingsClient, type ListingInfo } from "../connectors/amazon/listings.ts";
 import { HttpError } from "../connectors/http.ts";
+import { AmazonRefundsClient } from "../connectors/amazon/refunds.ts";
 import { many, one, withTx, type Queryable } from "../storage/db.ts";
 import { audit } from "./audit.ts";
 import { parseSecret } from "./connections.ts";
@@ -12,7 +13,7 @@ import { requireRole, ServiceError, type Actor, type AppContext } from "./contex
  * the listing and confirming; never the worker, an automation or the AI.
  */
 
-interface ConnectionRow {
+export interface AmazonConnectionRow {
   id: string;
   workspace_id: string;
   region: AmazonRegion;
@@ -25,6 +26,7 @@ interface ConnectionRow {
   status: string;
   last_checked_at: Date | null;
   last_error: string | null;
+  refunds_enabled: boolean;
 }
 
 interface AmazonSecret {
@@ -34,23 +36,29 @@ interface AmazonSecret {
 
 const PENDING_STALE_MS = 5 * 60_000;
 
-async function loadConnection(q: Queryable, workspaceId: string): Promise<ConnectionRow | null> {
-  return one<ConnectionRow>(q, "SELECT * FROM amazon_listing_connections WHERE workspace_id = $1", [workspaceId]);
+export async function loadConnection(q: Queryable, workspaceId: string): Promise<AmazonConnectionRow | null> {
+  return one<AmazonConnectionRow>(q, "SELECT * FROM amazon_listing_connections WHERE workspace_id = $1", [workspaceId]);
 }
 
-async function clientFor(ctx: AppContext, q: Queryable, row: ConnectionRow): Promise<AmazonListingsClient> {
+/** Credentials of the stored access, for an SP-API client. Server only. */
+export async function amazonClientConfig(ctx: AppContext, q: Queryable, row: AmazonConnectionRow) {
   const secret = parseSecret<AmazonSecret>(await ctx.secrets.read(q, row.workspace_id, row.secret_id), "Amazon");
+  return {
+    region: row.region,
+    sellerId: row.seller_id,
+    clientId: row.client_id,
+    clientSecret: secret.clientSecret,
+    refreshToken: secret.refreshToken,
+    apiBaseUrl: row.api_base_url ?? undefined,
+    tokenUrl: row.token_url ?? undefined,
+    allowTestEndpoints: ctx.config.ALLOW_TEST_ENDPOINTS,
+  };
+}
+
+async function clientFor(ctx: AppContext, q: Queryable, row: AmazonConnectionRow): Promise<AmazonListingsClient> {
+  const config = await amazonClientConfig(ctx, q, row);
   try {
-    return new AmazonListingsClient({
-      region: row.region,
-      sellerId: row.seller_id,
-      clientId: row.client_id,
-      clientSecret: secret.clientSecret,
-      refreshToken: secret.refreshToken,
-      apiBaseUrl: row.api_base_url ?? undefined,
-      tokenUrl: row.token_url ?? undefined,
-      allowTestEndpoints: ctx.config.ALLOW_TEST_ENDPOINTS,
-    });
+    return new AmazonListingsClient(config);
   } catch (error) {
     throw new ServiceError(409, "NOT_CONNECTED", (error as Error).message);
   }
@@ -70,6 +78,7 @@ export async function getAmazonListingSettings(ctx: AppContext, actor: Actor) {
     status: row.status,
     lastCheckedAt: row.last_checked_at,
     lastError: row.last_error,
+    refundsEnabled: row.refunds_enabled,
   };
 }
 
@@ -136,6 +145,15 @@ export async function saveAmazonListingConnection(ctx: AppContext, actor: Actor,
   });
 }
 
+/** Owner switches refunds from the case on or off. Off by default. */
+export async function setAmazonRefundsEnabled(ctx: AppContext, actor: Actor, enabled: boolean): Promise<void> {
+  requireRole(actor, ["owner"]);
+  if (actor.type !== "user") throw new ServiceError(403, "FORBIDDEN", "Nur ein Mensch schaltet Erstattungen frei.");
+  const res = await ctx.db.query("UPDATE amazon_listing_connections SET refunds_enabled = $2, status = CASE WHEN $2 THEN 'configured' ELSE status END, updated_at = now() WHERE workspace_id = $1", [actor.workspaceId, enabled]);
+  if (!res.rowCount) throw new ServiceError(404, "NOT_FOUND", "Kein Amazon-Zugang hinterlegt.");
+  await audit(ctx.db, actor, enabled ? "amazon_refunds.enabled" : "amazon_refunds.disabled", "workspace", actor.workspaceId);
+}
+
 export async function deleteAmazonListingConnection(ctx: AppContext, actor: Actor): Promise<void> {
   requireRole(actor, ["owner"]);
   await withTx(ctx.db, async (tx) => {
@@ -151,7 +169,11 @@ export async function checkAmazonListingConnection(ctx: AppContext, actor: Actor
   requireRole(actor, ["owner"]);
   const row = await loadConnection(ctx.db, actor.workspaceId);
   if (!row) throw new ServiceError(404, "NOT_FOUND", "Kein Amazon-Zugang hinterlegt.");
-  const result = await (await clientFor(ctx, ctx.db, row)).checkAccess(row.marketplace_ids[0]!);
+  let result = await (await clientFor(ctx, ctx.db, row)).checkAccess(row.marketplace_ids[0]!);
+  if (result.ok && row.refunds_enabled) {
+    const refunds = await new AmazonRefundsClient(await amazonClientConfig(ctx, ctx.db, row)).checkAccess(row.marketplace_ids[0]!, ctx.now());
+    result = { ok: refunds.ok, detail: `${result.detail} ${refunds.detail}` };
+  }
   await ctx.db.query("UPDATE amazon_listing_connections SET status = $2, last_error = $3, last_checked_at = now() WHERE workspace_id = $1", [actor.workspaceId, result.ok ? "ok" : "error", result.ok ? null : result.detail]);
   return result;
 }
@@ -165,7 +187,7 @@ async function assertCase(q: Queryable, workspaceId: string, conversationId: str
   if (!ok) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
 }
 
-function checkedTarget(row: ConnectionRow | null, input: { sku: string; marketplaceId: string }): { row: ConnectionRow; sku: string; marketplaceId: string } {
+function checkedTarget(row: AmazonConnectionRow | null, input: { sku: string; marketplaceId: string }): { row: AmazonConnectionRow; sku: string; marketplaceId: string } {
   if (!row) throw new ServiceError(409, "NOT_CONNECTED", "Kein Amazon-Zugang hinterlegt. Bitte in den Einstellungen unter „Amazon-Angebote“ eintragen.");
   const sku = input.sku?.trim() ?? "";
   if (!sku || sku.length > 200) throw new ServiceError(400, "INVALID", "Bitte die Amazon-SKU (Händler-SKU) angeben.");
@@ -276,7 +298,7 @@ export async function listCaseListingActions(q: Queryable, workspaceId: string, 
 }
 
 /** For the case view: is the button available, and for which marketplaces. No credentials. */
-export async function caseAmazonListingAccess(q: Queryable, workspaceId: string): Promise<{ marketplaceIds: string[] } | null> {
-  const row = await one<{ marketplace_ids: string[] }>(q, "SELECT marketplace_ids FROM amazon_listing_connections WHERE workspace_id = $1", [workspaceId]);
-  return row ? { marketplaceIds: row.marketplace_ids } : null;
+export async function caseAmazonListingAccess(q: Queryable, workspaceId: string): Promise<{ marketplaceIds: string[]; refundsEnabled: boolean } | null> {
+  const row = await one<{ marketplace_ids: string[]; refunds_enabled: boolean }>(q, "SELECT marketplace_ids, refunds_enabled FROM amazon_listing_connections WHERE workspace_id = $1", [workspaceId]);
+  return row ? { marketplaceIds: row.marketplace_ids, refundsEnabled: row.refunds_enabled } : null;
 }

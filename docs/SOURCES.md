@@ -26,6 +26,9 @@ Order API sources retained below are **reference-only for other installations**,
 | AMZ-10 | [Manage purchasable offer](https://developer-docs.amazon/sp-api/docs/manage-purchasable-offer) | `end_at` in the past soft-closes an offer via `op: "merge"` on `/attributes/purchasable_offer` with marketplace/currency/audience selectors. |
 | AMZ-11 | [Listing status and seller-fulfilled inventory](https://developer-docs.amazon/sp-api/docs/understanding-amazon-listing-status-and-seller-fulfilled-inventory-management) | Closing = non-purchasable; status BUYABLE/DISCOVERABLE; live `fulfillmentAvailability`. |
 | AMZ-12 | [Manage product listings guide](https://developer-docs.amazon/sp-api/docs/manage-product-listings-guide) | Listing lifecycle with the Listings Items API. |
+| AMZ-13 | [Order feed type values](https://developer-docs.amazon/sp-api/docs/order-feed-type-values) | Checked 2026-11-14: `POST_PAYMENT_ADJUSTMENT_DATA` "issues a refund adjustment for an order", schema `OrderAdjustment` (XML), roles Inventory and Order Tracking / Direct-to-Consumer Shipping (Restricted), no deprecation notice on the page. |
+| AMZ-14 | [Order adjustment feed example (third-party connector docs)](https://cdn.cdata.com/help/ONN/xls/pg_SellerCentralsp-submitorderadjustmentfeed.htm) | Element layout `AmazonOrderID`, `AdjustedItem/AmazonOrderItemCode`, `AdjustmentReason`, `ItemPriceAdjustments/Component(Type, Amount currency)` and component types (Principal, Shipping, Tax, …). Secondary source; confirm against the XSD in a live test. |
+| AMZ-15 | Feeds API 2021-06-30 and Orders API v0 references (developer-docs.amazon/sp-api) | `createFeedDocument`, pre-signed upload, `createFeed`, `getFeed` (`processingStatus`, `resultFeedDocumentId`), `getFeedDocument` (`compressionAlgorithm`); `getOrder`, `getOrderItems` (`OrderItemId`, `ItemPrice`, `ShippingPrice`, `PromotionDiscount`). |
 
 Additional operational references: [Data encryption](https://developer-docs.amazon/sp-api/docs/protecting-amazon-api-applications-data-encryption); [DPP/AUP update published 2025-11-10](https://developer-docs.amazon/sp-api/changelog/updates-to-the-data-protection-policy-and-acceptable-use-policy); [current policies and agreements](https://developer-docs.amazon/sp-api/docs/policies-and-agreements).
 
@@ -51,6 +54,7 @@ Implementation note (2026-10-21): the Graph adapter reads via delta, fetches sin
 | EBAY-1 | [Sell Communications Guide](https://developer.ebay.com/develop/guides/sell/sell-communications-guide) | Conversation retrieval, messaging, OAuth scope and notification integration. |
 | EBAY-2 | [Commerce Message API release notes](https://developer.ebay.com/api-docs/commerce/message/release-notes.html) | Initial release on 2025-11-03. |
 | EBAY-3 | [Notification API release notes](https://developer.ebay.com/api-docs/commerce/notification/static/release-notes.html) | `NEW_MESSAGE` addition on 2025-11-17. |
+| EBAY-4 | [Fulfillment API issueRefund](https://developer.ebay.com/api-docs/sell/fulfillment/resources/order/methods/issueRefund), [Digital signatures for APIs](https://developer.ebay.com/develop/guides/sell/digital-signatures-for-apis) | `POST /order/{order_id}/issue_refund` (checked 2026-11-14). Scope `sell.finances` and the EU/UK signature requirement from earlier eBay documentation; re-check before building. |
 | EBAY-4 | [Commerce Message API OpenAPI 3](https://developer.ebay.com/api-docs/master/commerce/message/openapi/3/commerce_message_v1_oas3.json) | Checked 2026-10-22: base `/commerce/message/v1`, `GET /conversation`, `GET /conversation/{id}`, `POST /send_message`, scope `commerce.message`, field names used by the adapter. |
 | EBAY-5 | [Marketplace account deletion](https://developer.ebay.com/marketplace-account-deletion) | Checked 2026-10-22: GET `challenge_code` answered with `challengeResponse` = sha256 hex of code + token + endpoint; token 32–80 of `A-Za-z0-9_-`; POST with `x-ebay-signature`, ack 200–204, 412 on bad signature, public key via Notification API `getPublicKey`, cache one hour. Algorithm/digest (ECDSA, SHA1 over the raw body) follow eBay's official notification SDKs; not yet verified with a real keyset. |
 
@@ -61,6 +65,7 @@ Implementation note (2026-10-21): the Graph adapter reads via delta, fetches sin
 | KFL-1 | [Tickets](https://sellerapi.kaufland.com/?page=tickets) | Ticket/message workflow and customer-visible interim notices. |
 | KFL-2 | [REST API](https://sellerapi.kaufland.com/?page=rest-api) | HMAC authentication and technology-partner requirements. |
 | KFL-3 | [Push notifications](https://sellerapi.kaufland.com/?page=push-notifications) | Published event surface; ticket/message push not verified. |
+| KFL-5 | [Endpoint reference, Order units](https://sellerapi.kaufland.com/?page=endpoints#/Order%20Units) | Via a generated client of the published spec (checked 2026-11-14): `PATCH /v2/order-units/{id_order_unit}/refund` with `amount` (euro cents) and `reason`; empty response. |
 | KFL-4 | [Endpoint reference, Tickets](https://sellerapi.kaufland.com/?page=endpoints#/Tickets) | Checked 2026-10-22 via a generated client of the published spec: `GET /tickets/messages` (`ts_created_from_iso`, `limit`, `offset`), `GET /tickets/{id}?embedded=buyer,order_units,messages`, message fields `id_ticket_message`, `id_ticket`, `author{role,name}`, `text`, `ts_created_iso`. |
 
 ## Shop Apotheke and Mirakl
@@ -71,6 +76,7 @@ Implementation note (2026-10-21): the Graph adapter reads via delta, fetches sin
 | MIR-1 | [M11: List all threads](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/messages/m11) | Thread list, seek pagination, message inclusion limit, key scopes and synchronous-use guidance. |
 | MIR-2 | [M10: Retrieve a thread](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/messages/m10) | Thread detail and synchronous-use guidance. |
 | MIR-3 | [M12: Reply to a thread](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/messages/m12) | Documented thread reply operation. |
+| MIR-4 | [OR28: Perform refunds on order lines](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/orders/or28) | `PUT /api/orders/refund`, refunds per `order_line_id` with `amount`, `quantity`, `reason_code`, `shipping_amount`; refund roles on the shop key (checked 2026-11-14). |
 
 Generic Mirakl documentation does not prove a particular operator's account permissions or authorize unattended synchronization.
 

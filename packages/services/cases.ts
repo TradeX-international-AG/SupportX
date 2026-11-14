@@ -1,5 +1,6 @@
 import { caseForwards } from "./forwards.ts";
 import { caseAmazonListingAccess, listCaseListingActions } from "./amazon-listings.ts";
+import { listCaseMarketplaceRefunds } from "./amazon-refunds.ts";
 import { CONNECTOR_CATALOG } from "../connectors/catalog.ts";
 import { customerText } from "../core/customer-text.ts";
 import { many, one, withTx } from "../storage/db.ts";
@@ -231,7 +232,7 @@ export async function getCase(ctx: AppContext, actor: Actor, conversationId: str
   const caseFiles = await listCaseFiles(ctx, actor, conversationId);
   const invoices = invoiceSummary(link?.status === "unique" ? link.snapshot : null);
   const forwards = await caseForwards(ctx, ws, conversationId);
-  const [listingActions, amazonListings] = await Promise.all([listCaseListingActions(ctx.db, ws, conversationId), caseAmazonListingAccess(ctx.db, ws)]);
+  const [listingActions, amazonListings, marketplaceRefunds] = await Promise.all([listCaseListingActions(ctx.db, ws, conversationId), caseAmazonListingAccess(ctx.db, ws), listCaseMarketplaceRefunds(ctx.db, ws, conversationId)]);
   const refundList = await caseRefundStatus(ctx, ws, conversationId);
   const { refund, returnCheck: returnCheckResult } = await refundDueFor(ctx, ws, conversationId, conversation as { outcome: string | null; subject: string | null }, orderLink as { status: string; external_order_id: string | null; snapshot: OrderRecord | null } | null);
   // What "Erledigt" still needs at the marketplace (Amazon: answered via relay, or its own "Fall lösen" link).
@@ -240,7 +241,7 @@ export async function getCase(ctx: AppContext, actor: Actor, conversationId: str
     [...(messages as Array<{ direction: string; kind: string; body_text: string; received_at: Date }>),
      ...(related as Array<{ direction: string; kind: string; body_text: string; received_at: Date }>).filter((m) => m.kind === "own_copy")],
   );
-  return { conversation, messages, forwards, relatedMessages: related.reverse(), customerHistory, notes, orderLink, drafts, approvals, outbox, history, accounts, members, send, linkTargets, titleHints, writer, replyFiles, caseFiles, invoices, listingActions, amazonListings, refund, returnCheck: returnCheckResult, refundList, resolveAt };
+  return { conversation, messages, forwards, relatedMessages: related.reverse(), customerHistory, notes, orderLink, drafts, approvals, outbox, history, accounts, members, send, linkTargets, titleHints, writer, replyFiles, caseFiles, invoices, listingActions, amazonListings, marketplaceRefunds, refund, returnCheck: returnCheckResult, refundList, resolveAt };
 }
 
 /**

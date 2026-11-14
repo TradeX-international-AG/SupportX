@@ -79,6 +79,8 @@ export async function seedDemo(opts: { reset?: boolean; log?: (line: string) => 
       apiBaseUrl: `http://127.0.0.1:${DEMO_PORTS.amazon}`, tokenUrl: `http://127.0.0.1:${DEMO_PORTS.amazon}/auth/o2/token`,
     });
     await saveDhlConnection(ctx, owner, { apiKey: DEMO_DHL.apiKey, apiUrl: `http://127.0.0.1:${DEMO_PORTS.dhl}/track/shipments` });
+    // Demo only: refunds from the case switched on (synthetic Amazon test double).
+    await ctx.db.query("UPDATE amazon_listing_connections SET refunds_enabled = true WHERE workspace_id = $1", [workspaceId]);
     await addRoutingRule(ctx, owner, connectionId, { matchType: "from_domain", pattern: DEMO.ebayDomain, sourcePlatform: "ebay", merchantAccountId: accounts.ebay, priority: 10 });
     log(`[demo] Demo-Arbeitsbereich angelegt: ${DEMO_WORKSPACE}`);
     for (const user of DEMO_USERS) log(`[demo] Anmeldung ${user.role}: ${user.email} / ${DEMO_PASSWORD}`);

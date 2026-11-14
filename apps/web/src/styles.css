@@ -380,3 +380,4 @@ button.pattern-choice code { font-family: var(--mono); font-size: 12px; color: v
 .refund-row.done .refund-number, .refund-row.done .refund-items li, .refund-row.done .refund-kind, .refund-row.done .refund-sum { text-decoration: line-through; text-decoration-color: var(--muted); }
 .full-refund { align-self: flex-start; margin: 4px 0 8px; }
 .resolve-at { margin: 6px 0 0; max-width: 34em; }
+.refund-items { display: flex; flex-direction: column; gap: 10px; } .refund-item { border-top: 1px solid var(--line, #e5e5e5); padding-top: 8px; } .refund-item input { width: 8em; } input.invalid { border-color: var(--bad); }

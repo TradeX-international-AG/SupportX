@@ -49,6 +49,10 @@ export async function startDemoFakes() {
     ...DEMO_AMAZON,
     port: DEMO_PORTS.amazon,
     listings: [{ sku: "D-1001", marketplaceId: "A1PA6795UKMFR9", asin: "B0DEMO1001", itemName: "Demo-Teekanne Glas 1,2 l, 2 Stück", productType: "KITCHEN", offers: [{ offerType: "B2C", currency: "EUR", amount: "24.90" }], quantity: 8 }],
+    orders: [{ orderId: "302-1234567-7654321", status: "Shipped", fulfillmentChannel: "MFN", marketplaceId: "A1PA6795UKMFR9", currency: "EUR", items: [
+      { orderItemId: "40000000000001", sku: "D-1001", title: "Demo-Teekanne Glas 1,2 l", quantity: 1, itemPrice: "24.90", shippingPrice: "4.90" },
+      { orderItemId: "40000000000002", sku: "D-1002", title: "Demo-Teesieb Edelstahl", quantity: 2, itemPrice: "19.80" },
+    ] }],
   });
   const day = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
   const dhl = await startFakeDhl({

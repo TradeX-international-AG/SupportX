@@ -22,18 +22,39 @@ export interface FakeListing {
 /** reset: the change is applied, then the connection drops before the answer (ambiguous send). */
 export type PatchFault = "none" | "reset" | "invalid" | "forbidden";
 
+/** An order for the Orders API v0 (synthetic). Amounts are decimal strings like Amazon sends them. */
+export interface FakeOrder {
+  orderId: string;
+  status: string;
+  fulfillmentChannel: "MFN" | "AFN";
+  marketplaceId: string;
+  currency: string;
+  items: Array<{ orderItemId: string; sku: string; title: string; quantity: number; itemPrice: string; shippingPrice?: string; promotionDiscount?: string }>;
+}
+
+/**
+ * Feeds: reset = the feed is created, then the connection drops (ambiguous send);
+ * reject = processed with an error in the report; forbidden = 403 (role missing).
+ */
+export type FeedFault = "none" | "reset" | "reject" | "forbidden" | "pending";
+
 export interface FakeAmazon {
   url: string;
   tokenUrl: string;
   listings: FakeListing[];
   requests: Array<{ method: string; path: string; body?: unknown }>;
-  fault: { patch: PatchFault };
+  fault: { patch: PatchFault; feed: FeedFault };
+  orders: FakeOrder[];
+  /** Feed documents as uploaded (XML), by feed id. */
+  feeds: Array<{ feedId: string; feedType: string; marketplaceIds: string[]; document: string }>;
   close(): Promise<void>;
 }
 
-export async function startFakeAmazon(opts: { sellerId: string; clientId: string; clientSecret: string; refreshToken: string; listings: FakeListing[]; port?: number }): Promise<FakeAmazon> {
+export async function startFakeAmazon(opts: { sellerId: string; clientId: string; clientSecret: string; refreshToken: string; listings: FakeListing[]; orders?: FakeOrder[]; port?: number }): Promise<FakeAmazon> {
   const accessToken = "Atza|fake-access";
-  const state: Omit<FakeAmazon, "url" | "tokenUrl" | "close"> = { listings: opts.listings, requests: [], fault: { patch: "none" } };
+  const state: Omit<FakeAmazon, "url" | "tokenUrl" | "close"> = { listings: opts.listings, requests: [], fault: { patch: "none", feed: "none" }, orders: opts.orders ?? [], feeds: [] };
+  const documents = new Map<string, string>();
+  let base = "";
   const send = (res: ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
@@ -56,8 +77,58 @@ export async function startFakeAmazon(opts: { sellerId: string; clientId: string
       if (form.get("refresh_token") !== opts.refreshToken) return send(res, 400, { error: "invalid_grant", error_description: "The request has an invalid grant parameter : refresh_token" });
       return send(res, 200, { access_token: accessToken, token_type: "bearer", expires_in: 3600 });
     }
+    // Pre-signed S3 upload/download: no SP-API token, the URL is the authorisation.
+    const s3 = /^\/s3\/([^/]+)$/.exec(url.pathname);
+    if (s3) {
+      if (req.method === "PUT") {
+        documents.set(s3[1]!, raw);
+        res.writeHead(200);
+        return void res.end();
+      }
+      res.writeHead(200, { "content-type": "text/xml" });
+      return void res.end(documents.get(s3[1]!) ?? "");
+    }
     if (req.headers["x-amz-access-token"] !== accessToken) return send(res, 403, { errors: [{ code: "Unauthorized", message: "Access to requested resource is denied." }] });
 
+    if (url.pathname.startsWith("/orders/v0/") || url.pathname.startsWith("/feeds/2021-06-30/")) {
+      if (state.fault.feed === "forbidden") return send(res, 403, { errors: [{ code: "Unauthorized", message: "Access to requested resource is denied." }] });
+      if (url.pathname === "/orders/v0/orders") return send(res, 200, { payload: { Orders: [], CreatedBefore: new Date().toISOString() } });
+      const om = /^\/orders\/v0\/orders\/([^/]+)(\/orderItems)?$/.exec(url.pathname);
+      if (om) {
+        const order = state.orders.find((o) => o.orderId === decodeURIComponent(om[1]!));
+        if (!order) return send(res, 404, { errors: [{ code: "NotFound", message: "Order not found" }] });
+        const money = (v?: string) => (v === undefined ? undefined : { CurrencyCode: order.currency, Amount: v });
+        if (om[2]) {
+          return send(res, 200, { payload: { AmazonOrderId: order.orderId, OrderItems: order.items.map((i) => ({ OrderItemId: i.orderItemId, SellerSKU: i.sku, ASIN: "B0TEST0001", Title: i.title, QuantityOrdered: i.quantity, ItemPrice: money(i.itemPrice), ShippingPrice: money(i.shippingPrice), PromotionDiscount: money(i.promotionDiscount ?? "0.00") })) } });
+        }
+        return send(res, 200, { payload: { AmazonOrderId: order.orderId, OrderStatus: order.status, FulfillmentChannel: order.fulfillmentChannel, MarketplaceId: order.marketplaceId, OrderTotal: { CurrencyCode: order.currency, Amount: "0" } } });
+      }
+      if (url.pathname === "/feeds/2021-06-30/documents" && req.method === "POST") {
+        const id = `amzn1.tortuga.doc.${documents.size + 1}`;
+        documents.set(id, "");
+        return send(res, 201, { feedDocumentId: id, url: `${base}/s3/${encodeURIComponent(id)}` });
+      }
+      if (url.pathname === "/feeds/2021-06-30/feeds" && req.method === "POST") {
+        const body = parsed as { feedType: string; marketplaceIds: string[]; inputFeedDocumentId: string };
+        const feedId = String(50000 + state.feeds.length + 1);
+        state.feeds.push({ feedId, feedType: body.feedType, marketplaceIds: body.marketplaceIds, document: documents.get(body.inputFeedDocumentId) ?? "" });
+        if (state.fault.feed === "reset") return void req.socket.destroy();
+        return send(res, 202, { feedId });
+      }
+      const fm = /^\/feeds\/2021-06-30\/feeds\/([^/]+)$/.exec(url.pathname);
+      if (fm) {
+        const feed = state.feeds.find((f) => f.feedId === fm[1]);
+        if (!feed) return send(res, 404, { errors: [{ code: "NotFound", message: "Feed not found" }] });
+        if (state.fault.feed === "pending") return send(res, 200, { feedId: feed.feedId, feedType: feed.feedType, processingStatus: "IN_PROGRESS" });
+        const ok = state.fault.feed !== "reject";
+        const reportId = `report-${feed.feedId}`;
+        documents.set(reportId, `<?xml version="1.0"?><AmazonEnvelope><Header><DocumentVersion>1.02</DocumentVersion></Header><MessageType>ProcessingReport</MessageType><Message><MessageID>1</MessageID><ProcessingReport><DocumentTransactionID>${feed.feedId}</DocumentTransactionID><StatusCode>Complete</StatusCode><ProcessingSummary><MessagesProcessed>1</MessagesProcessed><MessagesSuccessful>${ok ? 1 : 0}</MessagesSuccessful><MessagesWithError>${ok ? 0 : 1}</MessagesWithError><MessagesWithWarning>0</MessagesWithWarning></ProcessingSummary>${ok ? "" : "<Result><MessageID>1</MessageID><ResultCode>Error</ResultCode><ResultMessageCode>18028</ResultMessageCode><ResultDescription>The refund amount exceeds the amount charged &amp; available.</ResultDescription></Result>"}</ProcessingReport></Message></AmazonEnvelope>`);
+        return send(res, 200, { feedId: feed.feedId, feedType: feed.feedType, processingStatus: "DONE", resultFeedDocumentId: reportId });
+      }
+      const dm = /^\/feeds\/2021-06-30\/documents\/([^/]+)$/.exec(url.pathname);
+      if (dm) return send(res, 200, { feedDocumentId: decodeURIComponent(dm[1]!), url: `${base}/s3/${dm[1]}` });
+      return send(res, 404, { errors: [{ code: "NotFound", message: "Not found" }] });
+    }
     const m = /^\/listings\/2021-08-01\/items\/([^/]+)(?:\/([^/]+))?$/.exec(url.pathname);
     if (!m) return send(res, 404, { errors: [{ code: "NotFound", message: "Not found" }] });
     const sellerId = decodeURIComponent(m[1]!);
@@ -94,6 +165,7 @@ export async function startFakeAmazon(opts: { sellerId: string; clientId: string
   });
   await new Promise<void>((resolve) => server.listen(opts.port ?? 0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  base = url;
   return Object.assign(state, {
     url,
     tokenUrl: `${url}/auth/o2/token`,

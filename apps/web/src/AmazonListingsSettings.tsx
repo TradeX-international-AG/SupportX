@@ -4,7 +4,7 @@ import { AMAZON_MARKETPLACES, AMAZON_REGION_LABEL, type AmazonRegion } from "../
 
 type Settings =
   | { configured: false }
-  | { configured: true; region: AmazonRegion; sellerIdHint: string; clientIdHint: string; marketplaceIds: string[]; status: string; lastCheckedAt: string | null; lastError: string | null };
+  | { configured: true; region: AmazonRegion; sellerIdHint: string; clientIdHint: string; marketplaceIds: string[]; status: string; lastCheckedAt: string | null; lastError: string | null; refundsEnabled: boolean };
 
 /**
  * Settings card for the Amazon Selling Partner API access that lets a person
@@ -55,6 +55,18 @@ export function AmazonListingsCard({ base, owner }: { base: string; owner: boole
             {data.lastCheckedAt && <div className="kv"><span>Geprüft</span><span>{fmtDate(data.lastCheckedAt)}</span></div>}
           </div>
           {data.lastError && <p className="notice bad small">{data.lastError}</p>}
+          <div className="stack">
+            <label className="row small">
+              <input type="checkbox" checked={data.refundsEnabled} disabled={!owner}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  if (on && !window.confirm("Erstattungen aus dem Fall freischalten? Dann kann jede Person mit Bearbeiten-Recht im Fall eine Erstattung bei Amazon auslösen, immer mit Bestätigung und nie mehr als bezahlt.")) return;
+                  void run(() => api("PUT", `${base}/amazon-listings/refunds`, { enabled: on }), () => (on ? "Erstattungen freigeschaltet. Bitte einmal „Verbindung testen“: SupportX prüft dabei, ob Bestellungen lesbar sind." : "Erstattungen aus dem Fall ausgeschaltet."));
+                }} />
+              Erstattungen aus dem Fall erlauben
+            </label>
+            <span className="muted small">Gibt dem Kunden bei Amazon Geld zurück (Erstattung über die Bestellung). Braucht zusätzlich die Rolle „Inventory and Order Tracking“ in der SP-API-App; nach dem Hinzufügen der Rolle muss der Verkäufer die App neu autorisieren und den neuen Refresh-Token hier unter „Ändern“ eintragen.</span>
+          </div>
           {owner && (
             <div className="row wrap">
               <button className={connected ? "" : "primary"} onClick={() => void run(() => api("POST", `${base}/amazon-listings/check`), (r) => { const x = r as { ok: boolean; detail: string }; return `${x.ok ? "Verbindung in Ordnung" : "Prüfung fehlgeschlagen"}: ${x.detail}`; })}>Verbindung testen</button>
