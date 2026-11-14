@@ -46,6 +46,7 @@ import { attachUploadedFile, deleteDocument, getDocument, listDocuments, setDraf
 import { draftInvoiceReply, fetchCaseInvoices } from "../../packages/services/invoices.ts";
 import { deleteLogo, getLogo, logoVersion, previewDesign, resetDesign, saveDesign, saveLogo, workspaceTheme } from "../../packages/services/design.ts";
 import { writeDesignMd, type WorkspaceTheme } from "../../packages/core/design-md.ts";
+import { checkDhlConnection, deleteDhlConnection, getDhlSettings, saveDhlConnection, trackCaseParcels } from "../../packages/services/dhl-tracking.ts";
 import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection } from "../../packages/services/amazon-listings.ts";
 import { batchCandidates, sendMany } from "../../packages/services/batch.ts";
 import { supportReport } from "../../packages/services/reports.ts";
@@ -317,6 +318,11 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     const body = parse(z.object({ ...listingTarget, confirm: z.literal(true), expectedAsin: z.string().max(20).optional() }), req.body);
     return closeAmazonOffer(ctx, await actor(req), (req.params as { id: string }).id, body);
   });
+  // DHL parcel status: on opening the case only numbers without a fresh answer; force = the "Neu abrufen" click.
+  app.post("/api/w/:ws/cases/:id/parcel-tracking", async (req) => {
+    const body = parse(z.object({ force: z.boolean().optional() }), req.body ?? {});
+    return trackCaseParcels(ctx, await actor(req), (req.params as { id: string }).id, body);
+  });
   app.post("/api/w/:ws/cases/:id/redraft", async (req) => {
     const body = parse(z.object({ decision: z.enum(["customer_right", "customer_wrong", "ask_customer"]) }), req.body);
     await requestRedraft(ctx, await actor(req), (req.params as { id: string }).id, body.decision);
@@ -468,6 +474,17 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     return { ok: true };
   });
   app.post("/api/w/:ws/amazon-listings/check", async (req) => checkAmazonListingConnection(ctx, await actor(req)));
+  // DHL Shipment Tracking (owner). The key is never returned, only "••••abcd".
+  app.get("/api/w/:ws/dhl-tracking", async (req) => getDhlSettings(ctx, await actor(req)));
+  app.put("/api/w/:ws/dhl-tracking", async (req) => {
+    await saveDhlConnection(ctx, await actor(req), parse(z.object({ apiKey: z.string().max(200), apiUrl: z.string().max(300).optional() }), req.body));
+    return { ok: true };
+  });
+  app.delete("/api/w/:ws/dhl-tracking", async (req) => {
+    await deleteDhlConnection(ctx, await actor(req));
+    return { ok: true };
+  });
+  app.post("/api/w/:ws/dhl-tracking/check", async (req) => checkDhlConnection(ctx, await actor(req)));
   app.put("/api/w/:ws/erp", async (req) => {
     const body = parse(z.object({ baseUrl: z.string().max(300), apiToken: z.string().max(500).optional(), searchFields: z.array(z.string()).max(5).optional() }), req.body);
     return { id: await upsertWeclappConnection(ctx, await actor(req), body) };

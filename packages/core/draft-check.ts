@@ -1,4 +1,5 @@
 import type { AllowedFact, OrderRecord } from "./contracts.ts";
+import { hasCarrierDelivered, hasCarrierDispatch } from "./carrier-tracking.ts";
 import { hasDeliveredEvidence, hasDispatchEvidence } from "./facts.ts";
 import { openPlaceholders } from "./snippets.ts";
 
@@ -95,9 +96,10 @@ export function checkDraft(input: DraftCheckInput): DraftIssue[] {
   }
 
   const lower = text.toLowerCase();
-  if (unnegatedMatch(lower, DELIVERY_WORDS) && !hasDeliveredEvidence(input.order)) {
-    issues.push({ severity: "block", code: "DELIVERY_CLAIM_UNSUPPORTED", message: "Der Text spricht von Zustellung, das ERP enthält aber keinen Zustellvermerk." });
-  } else if (unnegatedMatch(lower, DISPATCH_WORDS) && !hasDispatchEvidence(input.order)) {
+  // A delivery scan of the carrier (DHL) backs the sentence as well as an ERP delivery booking.
+  if (unnegatedMatch(lower, DELIVERY_WORDS) && !hasDeliveredEvidence(input.order) && !hasCarrierDelivered(input.facts)) {
+    issues.push({ severity: "block", code: "DELIVERY_CLAIM_UNSUPPORTED", message: "Der Text spricht von Zustellung, weder das ERP noch DHL melden aber eine Zustellung." });
+  } else if (unnegatedMatch(lower, DISPATCH_WORDS) && !hasDispatchEvidence(input.order) && !hasCarrierDispatch(input.facts)) {
     issues.push({ severity: "block", code: "DISPATCH_CLAIM_UNSUPPORTED", message: "Der Text spricht von Versand, das ERP enthält aber keine Versandbuchung." });
   }
 

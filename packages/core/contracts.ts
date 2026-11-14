@@ -218,6 +218,11 @@ export interface ShipmentFact {
   weightKg?: number;
   /** Return labels weclapp created for this shipment (shippingReturnLabelsCount). A label alone is no return. */
   returnLabels?: number;
+  /**
+   * Recipient postal code of the shipment (weclapp recipientAddress.zipcode). Only
+   * sent to the carrier so it shows tracking details; never part of AI facts.
+   */
+  recipientPostalCode?: string;
 }
 
 export type { ReturnFact } from "./returns.ts";

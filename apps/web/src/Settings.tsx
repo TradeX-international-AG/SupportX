@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AmazonListingsCard } from "./AmazonListingsSettings.tsx";
+import { DhlTrackingCard } from "./DhlTracking.tsx";
 import { api, fmtDate, PLATFORM_LABEL, ROLE_HINT, ROLE_LABEL } from "./api.ts";
 import { DEADLINE_PLATFORMS, DEFAULT_REPLY_DEADLINES, MAX_DEADLINE_HOURS } from "../../../packages/core/deadline.ts";
 import { isStale, sinceLabel } from "../../../packages/core/fetch-freshness.ts";
@@ -143,6 +144,8 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
         {owner && (panel?.card === "weclapp" || !data.erp) && <ErpForm current={data.erp?.base_url ?? ""} onSubmit={(body) => { closePanel(); void act(() => api("PUT", `${base}/erp`, body), () => "weclapp gespeichert. Bitte einmal „Verbindung testen“."); }} />}
         {owner && data.erp && panel?.card !== "weclapp" && <div className="row"><button onClick={() => setPanel({ card: "weclapp", action: "erp" })}>Adresse oder Token ändern</button></div>}
       </SetupCard>
+
+      <DhlTrackingCard base={base} owner={owner} />
       </>}
 
       {tab === "marktplaetze" && <>

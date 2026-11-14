@@ -6,6 +6,7 @@ import { customerText } from "../core/customer-text.ts";
 import { detectRisks, newestEmailText } from "../core/classify.ts";
 import { checkDraft, hasBlockingIssue, type DraftIssue } from "../core/draft-check.ts";
 import { buildOrderFacts } from "../core/facts.ts";
+import { caseCarrierFacts } from "./dhl-tracking.ts";
 import { fillSnippet, type SnippetPlaceholder } from "../core/snippets.ts";
 import { getSnippet } from "./snippets.ts";
 import { AiProviderError } from "../ai/index.ts";
@@ -91,7 +92,7 @@ export async function generateDraft(ctx: AppContext, workspaceId: string, conver
   if (!conv.latest_inbound_message_id) return null;
   const ws = (await one<WorkspaceRow>(ctx.db, "SELECT reply_signature, reply_tone, default_language, allowed_link_prefixes, ai_enabled, ai_secret_id FROM workspaces WHERE id = $1", [workspaceId]))!;
   const { linkId, order } = await currentOrder(ctx.db, workspaceId, conversationId);
-  const facts = order ? buildOrderFacts(order) : [];
+  const facts = [...(order ? buildOrderFacts(order) : []), ...(await caseCarrierFacts(ctx.db, workspaceId, conversationId))];
   const history = await many<{ direction: "inbound" | "outbound"; body_text: string; received_at: Date; kind: string }>(
     ctx.db,
     "SELECT direction, body_text, received_at, kind FROM messages WHERE workspace_id = $1 AND conversation_id = $2 AND kind IN ('customer','echo','manual_external') ORDER BY received_at DESC LIMIT 8",
@@ -236,7 +237,7 @@ export async function composeDraft(ctx: AppContext, actor: Actor, conversationId
   const ws = (await one<WorkspaceRow>(ctx.db, "SELECT reply_signature, reply_tone, default_language, allowed_link_prefixes, ai_enabled, ai_secret_id FROM workspaces WHERE id = $1", [actor.workspaceId]))!;
   const provider = await providerFor(ctx, ws, actor.workspaceId);
   const { linkId, order } = await currentOrder(ctx.db, actor.workspaceId, conversationId);
-  const facts = order ? buildOrderFacts(order) : [];
+  const facts = [...(order ? buildOrderFacts(order) : []), ...(await caseCarrierFacts(ctx.db, actor.workspaceId, conversationId))];
   const body = provider.polish ? text : ["Guten Tag,", "", text, "", ws.reply_signature].join("\n");
   const issues = checkDraft({ text: body, citedFactIds: [], facts, order, orderStatus: orderStatusForAi(conv.order_match_status), allowedLinkPrefixes: ws.allowed_link_prefixes, sourcePlatform: conv.source_platform });
   const draft = await withTx(ctx.db, async (tx) => {
@@ -280,7 +281,7 @@ export async function snippetDraft(ctx: AppContext, actor: Actor, conversationId
   const rendered = await renderSnippet(ctx, actor, conversationId, snippetId);
   const ws = (await one<WorkspaceRow>(ctx.db, "SELECT allowed_link_prefixes FROM workspaces WHERE id = $1", [actor.workspaceId]))!;
   const { linkId, order } = await currentOrder(ctx.db, actor.workspaceId, conversationId);
-  const facts = order ? buildOrderFacts(order) : [];
+  const facts = [...(order ? buildOrderFacts(order) : []), ...(await caseCarrierFacts(ctx.db, actor.workspaceId, conversationId))];
   const issues = checkDraft({ text: rendered.text, citedFactIds: [], facts, order, orderStatus: orderStatusForAi(conv.order_match_status), allowedLinkPrefixes: ws.allowed_link_prefixes, sourcePlatform: conv.source_platform });
   const latest = await one<{ body_text: string }>(ctx.db, "SELECT body_text FROM messages WHERE workspace_id = $1 AND id = $2", [actor.workspaceId, conv.latest_inbound_message_id]);
   const risks = detectRisks(newestEmailText(latest?.body_text ?? ""));

@@ -2,6 +2,7 @@ import { DEMO, demoInboundMails, demoWeclappData } from "../packages/testing/dem
 import { startFakeGraph } from "../packages/testing/fake-graph.ts";
 import { startFakeWeclapp } from "../packages/testing/fake-weclapp.ts";
 import { startFakeAmazon } from "../packages/testing/fake-amazon.ts";
+import { startFakeDhl } from "../packages/testing/fake-dhl.ts";
 import { deflateSync } from "node:zlib";
 
 /** A plain coloured PNG (synthetic "customer photo" for the demo). */
@@ -19,13 +20,23 @@ function solidPng(width: number, height: number, [r, g, b]: [number, number, num
  * DEMO ONLY: local stand-ins for weclapp and Microsoft Graph with synthetic data.
  * The real adapters talk to these exactly as they would to the real services.
  */
-export const DEMO_PORTS = { weclapp: 4011, graph: 4012, amazon: 4013 };
+export const DEMO_PORTS = { weclapp: 4011, graph: 4012, amazon: 4013, dhl: 4014 };
+
+/** Synthetic DHL API key and parcel numbers of the demo (DHL test double only). */
+export const DEMO_DHL = { apiKey: "DemoDhlKey000000000000000000demo", parcels: ["00340434000000000101", "340434000102"] };
 
 /** Synthetic SP-API app and seller of the demo (Amazon test double only). */
 export const DEMO_AMAZON = { sellerId: "A1DEMOSELLER00", clientId: "amzn1.application-oa2-client.demo0000000000000000", clientSecret: "amzn1.oa2-cs.v1.demo-secret", refreshToken: "Atzr|demo-refresh-token" };
 
 export async function startDemoFakes() {
-  const weclapp = await startFakeWeclapp(demoWeclappData(), { token: DEMO.weclappToken, port: DEMO_PORTS.weclapp });
+  const data = demoWeclappData();
+  // Demo only: the first delivery goes out with DHL, so the case shows DHL's status.
+  const sh1 = data.shipment.find((s) => s.id === "sh-1");
+  if (sh1) {
+    sh1.parcels = DEMO_DHL.parcels.map((n, i) => ({ id: `pc-${i + 1}`, trackingId: n, trackingUrl: "https://www.dhl.de/de/privatkunden/pakete-empfangen/verfolgen.html?piececode=", weight: "0.6" }));
+    sh1.recipientAddress = { zipcode: "04109", countryCode: "DE" };
+  }
+  const weclapp = await startFakeWeclapp(data, { token: DEMO.weclappToken, port: DEMO_PORTS.weclapp });
   const graph = await startFakeGraph({ mailbox: DEMO.mailbox, clientSecret: DEMO.graphSecret, port: DEMO_PORTS.graph });
   const conversations = new Map<string, string>();
   for (const mail of demoInboundMails()) {
@@ -39,7 +50,17 @@ export async function startDemoFakes() {
     port: DEMO_PORTS.amazon,
     listings: [{ sku: "D-1001", marketplaceId: "A1PA6795UKMFR9", asin: "B0DEMO1001", itemName: "Demo-Teekanne Glas 1,2 l, 2 Stück", productType: "KITCHEN", offers: [{ offerType: "B2C", currency: "EUR", amount: "24.90" }], quantity: 8 }],
   });
-  return { weclapp, graph, amazon };
+  const day = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+  const dhl = await startFakeDhl({
+    apiKey: DEMO_DHL.apiKey,
+    port: DEMO_PORTS.dhl,
+    parcels: {
+      [DEMO_DHL.parcels[0]!]: { statusCode: "delivered", status: "Zugestellt", description: "Die Sendung wurde erfolgreich zugestellt.", timestamp: day(30), city: "Leipzig", postalCode: "04109",
+        history: [{ statusCode: "transit", status: "Die Sendung wurde in das Zustellfahrzeug geladen.", timestamp: day(34), city: "Leipzig" }, { statusCode: "transit", status: "Die Sendung wurde im Start-Paketzentrum bearbeitet.", timestamp: day(50), city: "Radefeld" }, { statusCode: "pre-transit", status: "Die Auftragsdaten zu dieser Sendung wurden vom Absender elektronisch an DHL übermittelt.", timestamp: day(60) }] },
+      [DEMO_DHL.parcels[1]!]: { statusCode: "transit", status: "Die Sendung wurde im Ziel-Paketzentrum bearbeitet.", timestamp: day(5), city: "Radefeld" },
+    },
+  });
+  return { weclapp, graph, amazon, dhl };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

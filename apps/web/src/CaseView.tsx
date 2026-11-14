@@ -9,6 +9,7 @@ import { trackingHref } from "../../../packages/core/tracking.ts";
 import { deadlineState } from "../../../packages/core/deadline.ts";
 import { formatKg, weightChecks, WEIGHT_SOURCE_NOTE } from "../../../packages/core/weight-check.ts";
 import { buildTimeline } from "../../../packages/core/timeline.ts";
+import { ParcelTrackingCard } from "./DhlTracking.tsx";
 import { AmazonOfferCard, LISTING_STATE, listingActionText, type ListingAction } from "./AmazonOffer.tsx";
 import { RETURN_STATUS_DE, returnSummary, type ReturnFact, type ReturnSummary } from "../../../packages/core/returns.ts";
 import type { RefundDue } from "../../../packages/core/refund-due.ts";
@@ -368,6 +369,8 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
               onAttach={(fileId, on) => draft && act(() => api("PUT", `${base}/drafts/${draft.id}/documents`, { documentIds: on ? [...(draft.document_ids ?? []), fileId] : (draft.document_ids ?? []).filter((x) => x !== fileId), expectedVersion: draft.version }), on ? "Rechnung wird mit der Antwort gesendet. Bitte Antwort lesen und senden." : "Rechnung aus der Antwort genommen.")}
             />
           </section>
+
+          <ParcelTrackingCard base={base} caseId={caseId} canEdit={canEdit} refreshKey={`${data.orderLink?.external_order_id ?? ""}|${data.orderLink?.retrieved_at ?? ""}|${(c.order_references ?? []).length}`} />
 
           {data.amazonListings && (c.source_platform === "amazon" || (data.listingActions?.length ?? 0) > 0) && (
             <AmazonOfferCard

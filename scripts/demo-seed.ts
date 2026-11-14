@@ -8,8 +8,9 @@ import { addRoutingRule, createGraphConnection, createMerchantAccount, upsertWec
 import type { Actor } from "../packages/services/context.ts";
 import { purgeWorkspace } from "../packages/services/purge.ts";
 import { DEMO } from "../packages/testing/demo-data.ts";
-import { DEMO_AMAZON, DEMO_PORTS } from "./demo-fakes.ts";
+import { DEMO_AMAZON, DEMO_DHL, DEMO_PORTS } from "./demo-fakes.ts";
 import { saveAmazonListingConnection } from "../packages/services/amazon-listings.ts";
+import { saveDhlConnection } from "../packages/services/dhl-tracking.ts";
 
 /**
  * DEMO ONLY. Creates a clearly labelled workspace with synthetic accounts and
@@ -77,6 +78,7 @@ export async function seedDemo(opts: { reset?: boolean; log?: (line: string) => 
       region: "eu", marketplaceIds: ["A1PA6795UKMFR9"], ...DEMO_AMAZON,
       apiBaseUrl: `http://127.0.0.1:${DEMO_PORTS.amazon}`, tokenUrl: `http://127.0.0.1:${DEMO_PORTS.amazon}/auth/o2/token`,
     });
+    await saveDhlConnection(ctx, owner, { apiKey: DEMO_DHL.apiKey, apiUrl: `http://127.0.0.1:${DEMO_PORTS.dhl}/track/shipments` });
     await addRoutingRule(ctx, owner, connectionId, { matchType: "from_domain", pattern: DEMO.ebayDomain, sourcePlatform: "ebay", merchantAccountId: accounts.ebay, priority: 10 });
     log(`[demo] Demo-Arbeitsbereich angelegt: ${DEMO_WORKSPACE}`);
     for (const user of DEMO_USERS) log(`[demo] Anmeldung ${user.role}: ${user.email} / ${DEMO_PASSWORD}`);

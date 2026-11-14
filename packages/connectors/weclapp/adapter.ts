@@ -137,6 +137,8 @@ export function mapShipment(shipment: Json, linesById: Map<string, OrderLineFact
     .sort((a, b) => (a.at ?? "").localeCompare(b.at ?? ""));
   const status = str(shipment.status);
   const statusAt = [...history].reverse().find((h) => h.status === status)?.at;
+  const recipient = shipment.recipientAddress && typeof shipment.recipientAddress === "object" ? (shipment.recipientAddress as Json) : {};
+  const zip = str(recipient.zipcode);
   return {
     id: String(shipment.id),
     shipmentNumber: str(shipment.shipmentNumber),
@@ -156,6 +158,7 @@ export function mapShipment(shipment: Json, linesById: Map<string, OrderLineFact
     parcels: mapParcels(shipment),
     ...(kg(shipment.packageWeight) !== undefined ? { weightKg: kg(shipment.packageWeight) } : {}),
     ...(num(shipment.shippingReturnLabelsCount) ? { returnLabels: num(shipment.shippingReturnLabelsCount) } : {}),
+    ...(zip ? { recipientPostalCode: zip } : {}),
   };
 }
 

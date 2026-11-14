@@ -6,7 +6,7 @@ import type { CapabilityState, SourcePlatform } from "../core/contracts.ts";
  * that an account was tested. Research date: 2026-10-21 (docs/CONNECTORS.md).
  */
 export interface ConnectorDescriptor {
-  platform: SourcePlatform | "microsoft" | "weclapp";
+  platform: SourcePlatform | "microsoft" | "weclapp" | "dhl";
   label: string;
   transport: string;
   implementation: "implemented" | "via_microsoft_mail" | "planned";
@@ -46,6 +46,21 @@ export const CONNECTOR_CATALOG: ReadonlyArray<ConnectorDescriptor> = [
       "Bestehende Integrationen des Token-Nutzers vor jeder Token-Erneuerung prüfen",
     ],
     notes: "Einzige Bestelldatenquelle im ersten Build.",
+  },
+  {
+    platform: "dhl",
+    label: "DHL Sendungsstatus (Shipment Tracking – Unified API)",
+    transport: "Lesend: GET /track/shipments je Sendungsnummer, beim Öffnen des Falls und per Klick",
+    implementation: "implemented",
+    receive: "not_implemented",
+    reply: "not_implemented",
+    accountTestNeeded: [
+      "API-Key einer App im DHL-Entwicklerportal mit freigeschalteter „Shipment Tracking – Unified“-API",
+      "Tageslimit des Keys (Start: 250 Abrufe am Tag) reicht für die Fälle; sonst im Portal „Request upgrade“",
+      "Steht die Empfänger-PLZ in weclapp unter shipment.recipientAddress.zipcode (für Details wie Orte)?",
+      "Stehen Retouren-Sendungsnummern in weclapp, oder nur in der Kundennachricht?",
+    ],
+    notes: "Nur der Status, den DHL meldet; ein Zustell-Scan belegt „zugestellt“ im Entwurf. Geprüft nur mit einem lokalen Test-Double, kein echter Key angebunden.",
   },
   {
     platform: "docmorris",

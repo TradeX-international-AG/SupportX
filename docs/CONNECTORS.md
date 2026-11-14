@@ -135,6 +135,17 @@ A tracking number or created shipping label is not proof of a carrier scan or de
 
 Token rotation can invalidate an existing credential: inspect the account's behavior and dependent integrations before replacing a token. Do not silently rotate credentials during setup. See [WC-1](SOURCES.md#weclapp).
 
+## DHL parcel status (0.16.0)
+
+SupportX reads the carrier's own status of the parcels in a case from the **DHL Shipment Tracking – Unified API** (developer.dhl.com), read only: `GET https://api-eu.dhl.com/track/shipments?trackingNumber=…&language=de` with the header `DHL-API-Key`. The optional `recipientPostalCode` comes from weclapp `shipment.recipientAddress.zipcode`; DHL only shows details such as places with the right postal code ("postal code challenge"), the status itself comes without it. The postal code is never part of AI facts.
+
+- **Which numbers:** every parcel of every weclapp delivery (`parcels[].trackingId`, legacy `packageTrackingNumber`) whose tracking address is DHL/Deutsche Post or, without an address, whose number has a DHL format; plus parcel numbers the customer wrote (often a return label). At most 10 per case. Numbers with another carrier's address (DPD, GLS, UPS, Hermes …) are not sent to DHL.
+- **When:** when a person opens the case, only for numbers without a fresh answer (delivered stays; others after 2 h), and on the click "Neu bei DHL abrufen" (at most every 5 min per number). The worker, automations and the AI never call DHL. Answers are stored per workspace in `parcel_tracking`.
+- **Limits:** a new app key has 250 calls a day at DHL; a 429 stops the round and the rest is asked on the next opening. A higher limit is requested in the developer portal ("Request upgrade").
+- **Drafts:** a DHL answer becomes a fact `carrier.<n>.<statusCode>` with source DHL. A DHL delivery scan backs "zugestellt" in the draft check (as a weclapp DELIVERED booking does); a transit scan backs "versendet/unterwegs". "Not found" and errors add nothing.
+- **Credentials:** owner enters the API key (Settings → Anbindungen → "DHL-Sendungsstatus"), stored encrypted (purpose `dhl_tracking`), shown only as `••••abcd`, replaced only after clicking "Ändern". Only `api-eu.dhl.com`, `api.dhl.com` and `api-test.dhl.com` are allowed outside test mode.
+- **Status:** tested only against the local test double `packages/testing/fake-dhl.ts`; no live DHL key has been connected yet. Open live checks: real response of a DHL Paket Germany parcel and a DHL return label, field `details.returnFlag`, whether weclapp fills `recipientAddress.zipcode`.
+
 ## Shared implementation rules
 
 1. Capabilities start disabled and become available only after implementation and account validation.
