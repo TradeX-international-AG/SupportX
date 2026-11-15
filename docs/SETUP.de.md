@@ -56,6 +56,8 @@ journalctl -u supportx-update.service -n 50   # Protokoll der Updates
 
 Liegt die Installation nicht unter `/opt/supportx`, die Pfade in `supportx-update.service` anpassen.
 
+**Testinstanz neben live (optional):** `sh deploy/test-instance.sh start` (auf dem Server, aus einem Klon mit diesem Skript) legt unter `/opt/supportx-test` einen zweiten Stand an (Standard: Zweig `main`, sonst `SUPPORTX_TEST_BRANCH`), mit einer Kopie der Live-Datenbank, derselben `.env` und demselben Theme. Live wird dabei nur gelesen. Die Testinstanz hat keinen Worker (kein Postfach-Abruf, kein Versand, keine Automatik), `SEND_MODE=drafts_only` und lauscht nur auf `127.0.0.1:3100`; geöffnet wird sie über einen SSH-Tunnel (`ssh -L 3100:127.0.0.1:3100 root@<server>`, dann `http://localhost:3100`). Knöpfe, die bei Amazon oder weclapp etwas auslösen, nutzen die kopierten Zugänge und wirken dort echt. `neu-kopie` holt die Live-Datenbank erneut, `stop` hält an, `entfernen` löscht Testinstanz und Testdatenbank.
+
 ## 3. Verkäuferkonten
 
 *Einstellungen → Verkäuferkonten.* Je Marktplatz-/Shop-Konto ein Eintrag mit dem Merkmal, an dem seine Aufträge in weclapp erkennbar sind (z. B. `salesChannel = GROSS2` oder `ecommerceOrder.externalConnectionId`). Das Merkmal bitte an echten Aufträgen in weclapp prüfen. Ein Fall mit Konto sucht zuerst in seinem Konto, dann in ganz weclapp. Ein Fall ohne Konto sucht direkt in ganz weclapp, und ein eindeutiger Treffer setzt das Konto, dessen Merkmal zum Auftrag passt.

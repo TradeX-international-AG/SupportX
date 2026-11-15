@@ -16,3 +16,6 @@ backups/
 private-fixtures/
 *.zip
 .deployed-commit
+/theme/
+.db-copied
+live-copy.dump
