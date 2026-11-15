@@ -3,7 +3,7 @@
 export const SETTINGS_TABS = [
   { id: "anbindungen", label: "Anbindungen" },
   { id: "marktplaetze", label: "Marktplätze" },
-  { id: "weitere", label: "Weitere" },
+  { id: "system", label: "System" },
 ] as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number]["id"];
@@ -11,7 +11,9 @@ export const DEFAULT_SETTINGS_TAB: SettingsTab = "anbindungen";
 
 /** The settings tab named by a URL hash ("#marktplaetze"), or null if the hash names none. */
 export function parseSettingsTab(hash: string): SettingsTab | null {
-  const id = decodeURIComponent(hash.replace(/^#/, "")).trim().toLowerCase();
+  const raw = decodeURIComponent(hash.replace(/^#/, "")).trim().toLowerCase();
+  // "#weitere" was the old name of the System tab; old links keep working.
+  const id = raw === "weitere" ? "system" : raw;
   return SETTINGS_TABS.find((t) => t.id === id)?.id ?? null;
 }
 
@@ -24,6 +26,6 @@ export function tabAlerts(setups: { anbindungen: ReadonlyArray<{ error: string |
   return {
     anbindungen: setups.anbindungen.filter((s) => s.error).length,
     marktplaetze: setups.marktplaetze.filter((s) => s.error).length,
-    weitere: 0,
+    system: 0,
   };
 }

@@ -202,7 +202,7 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
       <AmazonListingsCard base={base} owner={owner} />
       </>}
 
-      {tab === "weitere" && <>
+      {tab === "system" && <>
       {owner && (
         <section className="card">
           <h3>Auswertung</h3>
