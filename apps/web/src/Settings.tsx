@@ -26,7 +26,7 @@ interface Descriptor { platform: string; label: string; transport: string; imple
 interface SettingsData {
   workspace: { name: string; auto_invoice?: "off" | "draft" | "send"; reply_signature: string; reply_tone: string; allowed_link_prefixes: string[]; ai_enabled: boolean; has_ai_key: boolean; ai_key_hint: string | null; setup_confirmations: Record<string, { at: string; by: string | null }>; reply_deadlines?: Record<string, number>; automations?: Record<string, { mode: "off" | "draft" | "send"; since: string | null }> };
   accounts: Account[]; connections: Connection[]; rules: Rule[]; routes: Route[];
-  erp: null | { base_url: string; search_fields: string[]; has_secret: boolean; status: string; last_checked_at: string | null; last_error: string | null };
+  erp: null | { base_url: string; search_fields: string[]; has_secret: boolean; status: string; last_checked_at: string | null; last_error: string | null; credit_notes_enabled?: boolean };
   categoryRules: Array<{ id: string; match_type: string; pattern: string; category: "support" | "info"; hits: number; last_hit_at: string | null }>;
   jobs: Array<{ type: string; status: string; count: number; last_error: string | null }>;
   catalog: Descriptor[]; ai: { provider: string; model: string; promptVersion: string }; sendMode: string; demoMode: boolean; ebayOperatorApp?: boolean;
@@ -143,6 +143,20 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
         )}
         {owner && (panel?.card === "weclapp" || !data.erp) && <ErpForm current={data.erp?.base_url ?? ""} onSubmit={(body) => { closePanel(); void act(() => api("PUT", `${base}/erp`, body), () => "weclapp gespeichert. Bitte einmal „Verbindung testen“."); }} />}
         {owner && data.erp && panel?.card !== "weclapp" && <div className="row"><button onClick={() => setPanel({ card: "weclapp", action: "erp" })}>Adresse oder Token ändern</button></div>}
+        {data.erp && (
+          <div className="stack">
+            <label className="row small">
+              <input type="checkbox" checked={!!data.erp.credit_notes_enabled} disabled={!owner}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  if (on && !window.confirm("Gutschriften aus dem Fall freischalten? Dann kann jede Person mit Bearbeiten-Recht im Fall eine Gutschrift als Entwurf in weclapp anlegen, immer mit Bestätigung. Gebucht wird weiter in weclapp.")) return;
+                  void act(() => api("PUT", `${base}/erp/credit-notes`, { enabled: on }), () => (on ? "Gutschriften aus dem Fall freigeschaltet." : "Gutschriften aus dem Fall ausgeschaltet."));
+                }} />
+              Gutschriften aus dem Fall als Entwurf anlegen
+            </label>
+            <span className="muted small">SupportX legt die Gutschrift zur Rechnung in weclapp an (Status „Neu“, nicht gebucht), mit den Beträgen aus der Erstattung. Der weclapp-Benutzer des API-Tokens braucht dafür das Recht, Ausgangsrechnungen anzulegen und zu ändern.</span>
+          </div>
+        )}
       </SetupCard>
 
       <DhlTrackingCard base={base} owner={owner} />

@@ -1,4 +1,7 @@
 import type {
+  CreditNoteDraftInput,
+  CreditNoteDraftResult,
+  CreditSourceInvoice,
   InvoiceFact,
   OrderLineFact,
   OrderLookupResult,
@@ -25,7 +28,9 @@ import { assertAllowedEndpoint, HttpError, requestBinary, requestJson } from "..
  * salesInvoice.salesOrderId. The exact mapping of marketplace order numbers to
  * these fields must be confirmed against the operator's tenant (M0 data check).
  *
- * The adapter only issues GET requests. It never creates, rotates or replaces
+ * The adapter issues GET requests, with one exception: createCreditNoteDraft,
+ * called only after a person confirmed a credit note in the case and the owner
+ * switched credit notes on. It never books (no open item). It never creates, rotates or replaces
  * the API token: per weclapp documentation, generating a new token can
  * invalidate the user's previous tokens and break existing integrations.
  */
@@ -537,6 +542,77 @@ export class WeclappOrderProvider implements OrderProvider {
     return { data: file.data, contentType: file.contentType };
   }
 
+  async #call(method: "GET" | "POST" | "PUT", path: string, body?: unknown): Promise<Json> {
+    const res = await requestJson(new URL(`${this.#baseUrl}/${path}`), {
+      method,
+      headers: { AuthenticationToken: this.#config.apiToken, Accept: "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      timeoutMs: this.#config.timeoutMs ?? 30_000,
+      fetchImpl: this.#config.fetchImpl,
+    });
+    if (!res || typeof res !== "object") throw new HttpError("Unerwartete weclapp-Antwort.", 0, false);
+    return res as Json;
+  }
+
+  /** The invoice with its lines and article numbers (GET only). */
+  async getInvoiceForCredit(invoiceId: string): Promise<CreditSourceInvoice> {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(invoiceId)) throw new Error("Ungültige Rechnungs-ID.");
+    const inv = await this.#call("GET", `salesInvoice/id/${encodeURIComponent(invoiceId)}`);
+    const items = arr(inv.salesInvoiceItems);
+    const { rows: articles } = await this.#articles({ orderItems: items });
+    const byId = new Map(articles.map((a) => [String(a.id), a]));
+    const shippingGrossCents = arr(inv.shippingCostItems).reduce((sum, i) => sum + cents(i.grossAmount), 0);
+    return {
+      id: String(inv.id ?? invoiceId),
+      invoiceNumber: str(inv.invoiceNumber),
+      status: str(inv.status),
+      type: str(inv.salesInvoiceType),
+      currency: await this.#currency(str(inv.recordCurrencyId)),
+      // Without a total on the record: the lines plus shipping.
+      grossCents: num(inv.grossAmount) !== undefined ? cents(inv.grossAmount) : items.reduce((sum, i) => sum + cents(i.grossAmount), 0) + shippingGrossCents,
+      shippingGrossCents,
+      items: items.map((i, n) => ({
+        id: String(i.id ?? `item-${n + 1}`),
+        title: str(i.title) ?? str(i.description) ?? "Artikel",
+        articleNumber: str(i.articleNumber) ?? str(byId.get(str(i.articleId) ?? "")?.articleNumber),
+        quantity: num(i.quantity) ?? 0,
+        grossCents: cents(i.grossAmount),
+      })),
+    };
+  }
+
+  /**
+   * POST salesInvoice/id/{id}/createCreditNote with the chosen invoice items
+   * (weclapp creates the credit note in status NEW, nothing is booked), then sets
+   * the amounts: each line's unit price is scaled so its gross equals the
+   * requested gross, shipping cost items likewise (0 removes them). The update
+   * is a full replace with the fresh entity, as weclapp requires.
+   * A timeout on the POST is uncertain (a draft may exist).
+   */
+  async createCreditNoteDraft(invoiceId: string, input: CreditNoteDraftInput): Promise<CreditNoteDraftResult> {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(invoiceId)) throw new Error("Ungültige Rechnungs-ID.");
+    const created = await this.#call("POST", `salesInvoice/id/${encodeURIComponent(invoiceId)}/createCreditNote`, { itemIds: input.lines.map((l) => l.itemId) });
+    const note = (created.result && typeof created.result === "object" ? created.result : created) as Json;
+    const id = str(note.id);
+    if (!id) throw new HttpError("weclapp hat die Gutschrift angelegt, aber keine ID genannt. Bitte in weclapp nachsehen.", 0, false, true);
+    const base = { id, number: str(note.invoiceNumber), status: str(note.status) };
+    try {
+      // Fresh, full entity: weclapp replaces the whole record on PUT.
+      const fresh = await this.#call("GET", `salesInvoice/id/${encodeURIComponent(id)}`);
+      const wanted = new Map(input.lines.map((l) => [l.itemId, l.grossCents]));
+      const items = arr(fresh.salesInvoiceItems).map((item) => {
+        const source = str(item.creditedInvoiceItemId);
+        const target = source ? wanted.get(source) : undefined;
+        return target === undefined ? item : scaleLine(item, target);
+      });
+      const shipping = input.shippingGrossCents > 0 ? scaleShipping(arr(fresh.shippingCostItems), input.shippingGrossCents) : [];
+      const updated = await this.#call("PUT", `salesInvoice/id/${encodeURIComponent(id)}`, { ...fresh, salesInvoiceItems: items, shippingCostItems: shipping });
+      return { ...base, number: str(updated.invoiceNumber) ?? base.number, status: str(updated.status) ?? base.status, grossCents: cents(updated.grossAmount), adjusted: true };
+    } catch (error) {
+      return { ...base, grossCents: cents(note.grossAmount), adjusted: false, adjustError: (error as Error).message };
+    }
+  }
+
   async checkAccess(): Promise<{ ok: boolean; detail: string }> {
     try {
       await this.#get("salesOrder", { pageSize: "1" });
@@ -545,6 +621,32 @@ export class WeclappOrderProvider implements OrderProvider {
       return { ok: false, detail: (error as Error).message };
     }
   }
+}
+
+function cents(value: unknown): number {
+  const n = num(value);
+  return n === undefined ? 0 : Math.round(n * 100);
+}
+
+/** Unit price scaled so the line's gross becomes `targetCents` (works for net and gross price entry). */
+function scaleLine(item: Json, targetCents: number): Json {
+  const gross = cents(item.grossAmount);
+  const unit = num(item.unitPrice);
+  if (!gross || unit === undefined) throw new Error(`Position „${str(item.title) ?? ""}“: weclapp nennt keinen Betrag, Gutschrift bitte in weclapp anpassen.`);
+  if (targetCents === gross) return item;
+  return { ...item, unitPrice: (Math.round(unit * (targetCents / gross) * 10_000) / 10_000).toFixed(4), manualUnitPrice: true };
+}
+
+/** Shipping cost items scaled to a total gross of `targetCents`. */
+function scaleShipping(items: Json[], targetCents: number): Json[] {
+  const total = items.reduce((sum, i) => sum + cents(i.grossAmount), 0);
+  if (!total) throw new Error("Die Gutschrift hat keine Versandkosten-Position, Versand bitte in weclapp ergänzen.");
+  if (targetCents === total) return items;
+  return items.map((i) => {
+    const unit = num(i.unitPrice) ?? num(i.netAmount);
+    if (unit === undefined) throw new Error("Versandkosten ohne Betrag, bitte in weclapp anpassen.");
+    return { ...i, unitPrice: (Math.round(unit * (targetCents / total) * 10_000) / 10_000).toFixed(4) };
+  });
 }
 
 function toLookupError(error: unknown): OrderLookupResult {

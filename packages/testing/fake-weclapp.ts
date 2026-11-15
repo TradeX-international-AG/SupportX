@@ -20,6 +20,8 @@ export interface FakeWeclappData {
 
 export interface FakeWeclapp {
   baseUrl: string;
+  /** Write faults for credit notes: "forbidden" (read-only token), "reset" (draft created, answer lost), "put_fails" (draft created, update rejected). */
+  writeFault: "none" | "forbidden" | "reset" | "put_fails";
   data: FakeWeclappData;
   requests: string[];
   failNext: (status: number) => void;
@@ -38,8 +40,23 @@ function values(record: unknown, path: string[]): unknown[] {
 export async function startFakeWeclapp(data: FakeWeclappData, opts: { token: string; port?: number; rejectFilters?: ReadonlyArray<string>; forbidden?: ReadonlyArray<string> }): Promise<FakeWeclapp> {
   const requests: string[] = [];
   let failStatus: number | null = null;
-  const server: Server = createServer((req, res) => {
+  const state = { writeFault: "none" as FakeWeclapp["writeFault"] };
+  let creditNotes = 0;
+  const money = (v: unknown) => Number(v ?? 0);
+  const fix = (n: number) => n.toFixed(2);
+  /** Like weclapp in gross price entry: line gross = unit price × quantity, rounded to the cent. */
+  const recompute = (inv: Record<string, unknown>) => {
+    const items = (inv.salesInvoiceItems as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const i of items) i.grossAmount = fix(Math.round(money(i.unitPrice) * money(i.quantity || 1) * 100) / 100);
+    const ship = (inv.shippingCostItems as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const i of ship) i.grossAmount = fix(Math.round(money(i.unitPrice) * 100) / 100);
+    inv.grossAmount = fix([...items, ...ship].reduce((s, i) => s + money(i.grossAmount), 0));
+  };
+  const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const raw = Buffer.concat(chunks).toString("utf8");
     requests.push(`${req.method} ${url.pathname}${url.search}`);
     const send = (status: number, body: unknown) => {
       res.writeHead(status, { "Content-Type": "application/json" });
@@ -50,6 +67,36 @@ export async function startFakeWeclapp(data: FakeWeclappData, opts: { token: str
       const status = failStatus;
       failStatus = null;
       return send(status, { error: "simulated failure" });
+    }
+    const byId = /^\/webapp\/api\/v2\/salesInvoice\/id\/([^/]+)(\/createCreditNote)?$/.exec(url.pathname);
+    if (byId) {
+      const inv = data.salesInvoice.find((i) => String(i.id) === decodeURIComponent(byId[1]!));
+      if (!inv) return send(404, { error: "not found" });
+      if (req.method === "GET" && !byId[2]) return send(200, inv);
+      if (state.writeFault === "forbidden") return send(403, { error: "Der Benutzer hat keine Berechtigung." });
+      const body = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+      if (req.method === "POST" && byId[2]) {
+        const ids = (body.itemIds as string[] | undefined) ?? [];
+        creditNotes += 1;
+        const note: Record<string, unknown> = {
+          id: `cn-${creditNotes}`, version: "0", invoiceNumber: `GS-${8000 + creditNotes}`, status: "NEW", salesInvoiceType: "CREDIT_NOTE",
+          salesOrderId: inv.salesOrderId, recordCurrencyId: inv.recordCurrencyId, createdDate: Date.now(),
+          salesInvoiceItems: ((inv.salesInvoiceItems as Array<Record<string, unknown>> | undefined) ?? []).filter((i) => ids.includes(String(i.id)))
+            .map((i, n) => ({ ...i, id: `cn-${creditNotes}-item-${n + 1}`, version: "0", creditedInvoiceItemId: i.id })),
+          shippingCostItems: ((inv.shippingCostItems as Array<Record<string, unknown>> | undefined) ?? []).map((i, n) => ({ ...i, id: `cn-${creditNotes}-ship-${n + 1}` })),
+        };
+        recompute(note);
+        data.salesInvoice.push(note);
+        if (state.writeFault === "reset") return void req.socket.destroy();
+        return send(200, { result: note });
+      }
+      if (req.method === "PUT" && !byId[2]) {
+        if (state.writeFault === "put_fails") return send(400, { error: "property createdDate is read-only" });
+        if (inv.status !== "NEW") return send(400, { error: "record is booked" });
+        Object.assign(inv, body);
+        recompute(inv);
+        return send(200, inv);
+      }
     }
     if (req.method !== "GET") return send(405, { error: "read-only fake" });
     // Invoice document: a synthetic PDF, or 404 when the record says it has none (`noPdf`).
@@ -81,13 +128,13 @@ export async function startFakeWeclapp(data: FakeWeclappData, opts: { token: str
     server.listen(opts.port ?? 0, "127.0.0.1", resolve);
   });
   const port = (server.address() as AddressInfo).port;
-  return {
+  return Object.assign(state, {
     baseUrl: `http://127.0.0.1:${port}/webapp/api/v2`,
     data,
     requests,
-    failNext: (status) => {
+    failNext: (status: number) => {
       failStatus = status;
     },
-    close: () => new Promise((resolve) => server.close(() => resolve())),
-  };
+    close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
+  });
 }

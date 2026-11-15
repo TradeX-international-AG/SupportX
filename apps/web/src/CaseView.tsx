@@ -12,6 +12,7 @@ import { buildTimeline } from "../../../packages/core/timeline.ts";
 import { ParcelTrackingCard } from "./DhlTracking.tsx";
 import { AmazonOfferCard, LISTING_STATE, listingActionText, type ListingAction } from "./AmazonOffer.tsx";
 import { AmazonRefundCard, type MarketplaceRefund } from "./AmazonRefund.tsx";
+import { CreditNoteCard, type CaseCreditNote } from "./CreditNote.tsx";
 import { AMAZON_ORDER_ID } from "../../../packages/core/amazon-refund.ts";
 import { RETURN_STATUS_DE, returnSummary, type ReturnFact, type ReturnSummary } from "../../../packages/core/returns.ts";
 import type { RefundDue } from "../../../packages/core/refund-due.ts";
@@ -81,6 +82,9 @@ interface CaseData {
   amazonListings?: { marketplaceIds: string[]; refundsEnabled?: boolean } | null;
   /** Refunds triggered at a marketplace from this case. */
   marketplaceRefunds?: MarketplaceRefund[];
+  /** Credit note drafts in weclapp requested from this case, and whether the owner switched them on. */
+  creditNotes?: CaseCreditNote[];
+  creditNotesEnabled?: boolean;
   /** Goods back in weclapp and no refund recorded yet: the refund is to be done. */
   refund?: RefundDue;
   /** Returned quantities and amounts checked against the order (null when there is nothing to check). */
@@ -96,6 +100,12 @@ const AUDIT_LABEL: Record<string, string> = {
   "amazon.offer_close_rejected": "Amazon-Angebot deaktivieren: von Amazon abgelehnt",
   "amazon.offer_close_uncertain": "Amazon-Angebot deaktivieren: Antwort unklar",
   "amazon.refund_submitted": "Erstattung an Amazon übergeben",
+  "erp.credit_note_created": "Gutschrift als Entwurf in weclapp angelegt",
+  "erp.credit_note_needs_review": "Gutschrift in weclapp angelegt, Beträge prüfen",
+  "erp.credit_note_uncertain": "Gutschrift in weclapp: Antwort unklar",
+  "erp.credit_note_failed": "Gutschrift in weclapp: nicht angelegt",
+  "erp.credit_note_confirmed_manually": "Unklare Gutschrift: in weclapp vorhanden",
+  "erp.credit_note_dismissed": "Unklare Gutschrift: in weclapp geprüft, keine angelegt",
   "amazon.refund_accepted": "Erstattung von Amazon verarbeitet",
   "amazon.refund_rejected": "Erstattung von Amazon abgelehnt",
   "amazon.refund_uncertain": "Erstattung bei Amazon: Antwort unklar",
@@ -413,6 +423,9 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
               canEdit={canEdit}
               onDone={() => { void load(); onChanged(); }}
             />
+          )}
+          {data.creditNotesEnabled && (data.orderLink?.status === "unique" || (data.creditNotes?.length ?? 0) > 0) && (
+            <CreditNoteCard key={`cn-${caseId}`} base={base} caseId={caseId} notes={data.creditNotes ?? []} canEdit={canEdit} onDone={() => { void load(); onChanged(); }} />
           )}
           <Outcome key={`${c.id}:${c.outcome_at ?? ""}`} data={data} canEdit={canEdit} onSave={(outcome, note, amount) => act(() => api("POST", `${base}/cases/${caseId}/outcome`, { outcome, note, ...(amount !== undefined ? { amount } : {}) }), "Gespeichert.")}
             onAddToRefunds={() => act(() => api("POST", `${base}/cases/${caseId}/refund-list`), "Steht jetzt auf der Erstattungsliste.")} />

@@ -101,7 +101,7 @@ export function AmazonRefundCard({ base, caseId, orderIds, suggestedCents, refun
   }); };
   const check = (r: MarketplaceRefund) => run(async () => {
     const res = await api<{ state: string; messages: string[] }>("POST", `${base}/cases/${caseId}/amazon-refund/${r.id}/check`);
-    if (res.state === "accepted") setNotice({ tone: "ok", text: "Amazon hat die Erstattung verarbeitet. Der Fall steht mit dem Betrag auf der Erstattungsliste (Gutschrift in weclapp nicht vergessen)." });
+    if (res.state === "accepted") setNotice({ tone: "ok", text: "Amazon hat die Erstattung verarbeitet. Der Fall steht mit dem Betrag auf der Erstattungsliste. Die Gutschrift in weclapp nicht vergessen." });
     else if (res.state === "rejected") setNotice({ tone: "bad", text: `Amazon hat abgelehnt: ${res.messages.join("; ") || "ohne Grund"}` });
     else setNotice({ tone: "warn", text: "Amazon verarbeitet noch. Bitte später noch einmal abrufen." });
     onDone();
@@ -115,7 +115,7 @@ export function AmazonRefundCard({ base, caseId, orderIds, suggestedCents, refun
   return (
     <section className="card">
       <h3>Erstattung bei Amazon</h3>
-      <p className="muted small">Gibt Amazon dem Kunden Geld zurück, direkt aus dem Fall. SupportX liest dafür die Bestellung bei Amazon, du trägst je Artikel den Betrag ein und bestätigst die Summe. Mehr als bezahlt geht nicht. Die Gutschrift in weclapp machst du wie bisher.</p>
+      <p className="muted small">Gibt Amazon dem Kunden Geld zurück, direkt aus dem Fall. SupportX liest dafür die Bestellung bei Amazon, du trägst je Artikel den Betrag ein und bestätigst die Summe. Mehr als bezahlt geht nicht. Die Gutschrift in weclapp bereitest du danach unten unter „Gutschrift in weclapp“ vor (wenn freigeschaltet) oder machst sie wie bisher.</p>
       {canEdit && (
         <div className="stack">
           <label>Amazon-Bestellnummer

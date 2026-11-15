@@ -1,6 +1,7 @@
 import { caseForwards } from "./forwards.ts";
 import { caseAmazonListingAccess, listCaseListingActions } from "./amazon-listings.ts";
 import { listCaseMarketplaceRefunds } from "./amazon-refunds.ts";
+import { caseCreditNoteAccess, listCaseCreditNotes } from "./credit-notes.ts";
 import { CONNECTOR_CATALOG } from "../connectors/catalog.ts";
 import { customerText } from "../core/customer-text.ts";
 import { many, one, withTx } from "../storage/db.ts";
@@ -232,7 +233,7 @@ export async function getCase(ctx: AppContext, actor: Actor, conversationId: str
   const caseFiles = await listCaseFiles(ctx, actor, conversationId);
   const invoices = invoiceSummary(link?.status === "unique" ? link.snapshot : null);
   const forwards = await caseForwards(ctx, ws, conversationId);
-  const [listingActions, amazonListings, marketplaceRefunds] = await Promise.all([listCaseListingActions(ctx.db, ws, conversationId), caseAmazonListingAccess(ctx.db, ws), listCaseMarketplaceRefunds(ctx.db, ws, conversationId)]);
+  const [listingActions, amazonListings, marketplaceRefunds, creditNotes, creditNotesEnabled] = await Promise.all([listCaseListingActions(ctx.db, ws, conversationId), caseAmazonListingAccess(ctx.db, ws), listCaseMarketplaceRefunds(ctx.db, ws, conversationId), listCaseCreditNotes(ctx.db, ws, conversationId), caseCreditNoteAccess(ctx.db, ws)]);
   const refundList = await caseRefundStatus(ctx, ws, conversationId);
   const { refund, returnCheck: returnCheckResult } = await refundDueFor(ctx, ws, conversationId, conversation as { outcome: string | null; subject: string | null }, orderLink as { status: string; external_order_id: string | null; snapshot: OrderRecord | null } | null);
   // What "Erledigt" still needs at the marketplace (Amazon: answered via relay, or its own "Fall lösen" link).
@@ -241,7 +242,7 @@ export async function getCase(ctx: AppContext, actor: Actor, conversationId: str
     [...(messages as Array<{ direction: string; kind: string; body_text: string; received_at: Date }>),
      ...(related as Array<{ direction: string; kind: string; body_text: string; received_at: Date }>).filter((m) => m.kind === "own_copy")],
   );
-  return { conversation, messages, forwards, relatedMessages: related.reverse(), customerHistory, notes, orderLink, drafts, approvals, outbox, history, accounts, members, send, linkTargets, titleHints, writer, replyFiles, caseFiles, invoices, listingActions, amazonListings, marketplaceRefunds, refund, returnCheck: returnCheckResult, refundList, resolveAt };
+  return { conversation, messages, forwards, relatedMessages: related.reverse(), customerHistory, notes, orderLink, drafts, approvals, outbox, history, accounts, members, send, linkTargets, titleHints, writer, replyFiles, caseFiles, invoices, listingActions, amazonListings, marketplaceRefunds, creditNotes, creditNotesEnabled, refund, returnCheck: returnCheckResult, refundList, resolveAt };
 }
 
 /**
@@ -584,7 +585,7 @@ export async function getSettings(ctx: AppContext, actor: Actor) {
     many(ctx.db, "SELECT id, kind, display_name, config - 'clientState' - 'secretHint' - 'oauthStateHash' - 'oauthStateExpiresAt' - 'oauthStateUserId' AS config, secret_id IS NOT NULL AS has_secret, default_merchant_account_id, default_source_platform, send_enabled, paused, health, last_sync_at, last_error FROM channel_connections WHERE workspace_id = $1 ORDER BY display_name", [ws]),
     many(ctx.db, "SELECT r.id, r.connection_id, r.priority, r.match_type, r.pattern, r.source_platform, r.merchant_account_id, ma.name AS merchant_account_name FROM routing_rules r LEFT JOIN merchant_accounts ma ON ma.id = r.merchant_account_id WHERE r.workspace_id = $1 ORDER BY r.priority, r.pattern", [ws]),
     many(ctx.db, "SELECT v.id, v.connection_id, v.source_platform, v.evidence_note, v.verified_at, u.display_name AS verified_by FROM reply_route_verifications v LEFT JOIN users u ON u.id = v.verified_by WHERE v.workspace_id = $1 AND v.revoked_at IS NULL", [ws]),
-    one(ctx.db, "SELECT id, base_url, search_fields, secret_id IS NOT NULL AS has_secret, status, last_checked_at, last_error FROM erp_connections WHERE workspace_id = $1", [ws]),
+    one(ctx.db, "SELECT id, base_url, search_fields, secret_id IS NOT NULL AS has_secret, status, last_checked_at, last_error, credit_notes_enabled FROM erp_connections WHERE workspace_id = $1", [ws]),
     many(ctx.db, "SELECT id, match_type, pattern, category, hits, last_hit_at, created_at FROM category_rules WHERE workspace_id = $1 ORDER BY match_type DESC, pattern", [ws]),
     many(ctx.db, "SELECT type, status, count(*)::int AS count, max(last_error) AS last_error FROM jobs WHERE workspace_id = $1 AND (status IN ('queued','running','failed')) GROUP BY type, status ORDER BY type", [ws]),
   ]);

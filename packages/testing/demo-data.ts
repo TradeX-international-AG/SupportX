@@ -132,7 +132,12 @@ export function demoWeclappData(): FakeWeclappData {
     shipmentReturnReason: [{ id: "rr-1", name: "Ware beschädigt" }],
     currency: [{ id: "cur-eur", name: "EUR", currencySymbol: "€" }],
     salesInvoice: [
-      { id: "inv-1", invoiceNumber: "RE-9001", invoiceDate: day("2026-10-15"), status: "OPEN_ITEM_CREATED", paymentStatus: "PAID", salesInvoiceType: "STANDARD_INVOICE", salesOrderId: "so-amz-1", salesOrders: [{ id: "so-amz-1" }] },
+      { id: "inv-1", invoiceNumber: "RE-9001", invoiceDate: day("2026-10-15"), status: "OPEN_ITEM_CREATED", paymentStatus: "PAID", salesInvoiceType: "STANDARD_INVOICE", salesOrderId: "so-amz-1", salesOrders: [{ id: "so-amz-1" }],
+        // Lines for a credit note (gross price entry, like the fake recomputes).
+        salesInvoiceItems: [
+          { id: "invi-1", version: "1", title: "Demo-Teekanne Glas 1,2 l", articleId: "ART-soi-1", quantity: "1", unitPrice: "24.90", grossAmount: "24.90" },
+          { id: "invi-2", version: "1", title: "Demo-Teesieb Edelstahl", articleId: "ART-soi-2", quantity: "2", unitPrice: "9.90", grossAmount: "19.80" },
+        ] },
       { id: "inv-2", invoiceNumber: "RE-9002", invoiceDate: day("2026-10-13"), status: "OPEN_ITEM_CREATED", paymentStatus: "PAID", salesOrderId: "so-dm-1" },
     ],
   };

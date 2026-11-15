@@ -32,6 +32,7 @@ export interface ChannelConnectionRow {
   health: string;
   last_sync_at: Date | null;
   last_error: string | null;
+  credit_notes_enabled?: boolean;
 }
 
 export interface GraphConnectionSettings {
@@ -134,6 +135,7 @@ export interface ErpConnectionRow {
   status: string;
   last_checked_at: Date | null;
   last_error: string | null;
+  credit_notes_enabled?: boolean;
 }
 
 export interface MerchantAccountRow {

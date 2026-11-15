@@ -172,7 +172,10 @@ export async function issueAmazonRefund(ctx: AppContext, actor: Actor, conversat
     const check = checkRefund(order, requested, counting(earlier));
     if (!check.ok) throw new ServiceError(400, "INVALID", check.error);
     if (check.totalCents !== input.expectedTotalCents) throw new ServiceError(409, "TOTAL_CHANGED", `Der Betrag hat sich geändert (jetzt ${formatCents(check.totalCents, order.currency)}). Bitte neu prüfen und bestätigen.`);
-    const lines = check.lines.map((l) => ({ ...l, title: order.items.find((i) => i.orderItemId === l.orderItemId)?.title?.slice(0, 300) }));
+    const lines = check.lines.map((l) => {
+      const item = order.items.find((i) => i.orderItemId === l.orderItemId);
+      return { ...l, title: item?.title?.slice(0, 300), sku: item?.sku?.slice(0, 200) };
+    });
     const res = await tx.query<{ id: string }>(
       `INSERT INTO marketplace_refunds (workspace_id, conversation_id, platform, marketplace_id, order_id, reason, currency, total_cents, lines, state, requested_by)
        VALUES ($1, $2, 'amazon', $3, $4, $5, $6, $7, $8, 'pending', $9) RETURNING id`,

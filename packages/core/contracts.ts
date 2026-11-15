@@ -161,6 +161,32 @@ export interface MessageChannel {
   downloadInvoicePdf?(invoiceId: string): Promise<{ data: Buffer; contentType: string }>;
 }
 
+export interface CreditSourceInvoice {
+  id: string;
+  invoiceNumber?: string;
+  status?: string;
+  type?: string;
+  currency?: string;
+  grossCents: number;
+  shippingGrossCents: number;
+  items: Array<{ id: string; title: string; articleNumber?: string; quantity: number; grossCents: number }>;
+}
+
+export interface CreditNoteDraftInput {
+  lines: ReadonlyArray<{ itemId: string; grossCents: number }>;
+  shippingGrossCents: number;
+}
+
+export interface CreditNoteDraftResult {
+  id: string;
+  /** False when the draft was created but the amounts could not be set: the person must correct it in the ERP. */
+  adjusted: boolean;
+  adjustError?: string;
+  number?: string;
+  status?: string;
+  grossCents: number;
+}
+
 // ---------------------------------------------------------------------------
 // Order context
 
@@ -290,7 +316,7 @@ export interface ReferenceQuery {
   kind: "order" | "invoice" | "tracking";
 }
 
-/** Read-only order context. weclapp is the only implementation in v1. */
+/** Order context, read only, plus one optional write: a credit note draft after a person confirmed it. weclapp is the only implementation in v1. */
 export interface OrderProvider {
   readonly kind: "weclapp";
   findOrders(references: ReadonlyArray<ReferenceQuery>, scope: OrderScopeRule): Promise<OrderLookupResult>;
@@ -298,6 +324,14 @@ export interface OrderProvider {
   checkAccess(): Promise<{ ok: boolean; detail: string }>;
   /** The invoice document as the ERP renders it (read-only), for attaching to a reply. */
   downloadInvoicePdf?(invoiceId: string): Promise<{ data: Buffer; contentType: string }>;
+  /** An invoice with its lines, for a credit note. Read only. */
+  getInvoiceForCredit?(invoiceId: string): Promise<CreditSourceInvoice>;
+  /**
+   * Creates a credit note for the invoice as a draft (not booked, no open item),
+   * with only the given lines at the given gross amounts and the given shipping.
+   * A person checks and books it in the ERP.
+   */
+  createCreditNoteDraft?(invoiceId: string, input: CreditNoteDraftInput): Promise<CreditNoteDraftResult>;
 }
 
 // ---------------------------------------------------------------------------

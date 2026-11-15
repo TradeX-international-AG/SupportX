@@ -48,6 +48,7 @@ import { deleteLogo, getLogo, logoVersion, previewDesign, resetDesign, saveDesig
 import { writeDesignMd, type WorkspaceTheme } from "../../packages/core/design-md.ts";
 import { checkDhlConnection, deleteDhlConnection, getDhlSettings, saveDhlConnection, trackCaseParcels } from "../../packages/services/dhl-tracking.ts";
 import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection, setAmazonRefundsEnabled } from "../../packages/services/amazon-listings.ts";
+import { createCreditNote, lookupCreditNote, setCreditNotesEnabled, settleUncertainCreditNote } from "../../packages/services/credit-notes.ts";
 import { checkAmazonRefund, issueAmazonRefund, lookupAmazonRefundOrder, settleUncertainAmazonRefund } from "../../packages/services/amazon-refunds.ts";
 import { batchCandidates, sendMany } from "../../packages/services/batch.ts";
 import { supportReport } from "../../packages/services/reports.ts";
@@ -350,6 +351,23 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     await settleUncertainAmazonRefund(ctx, await actor(req), p.id, p.refundId, body);
     return { ok: true };
   });
+  // Credit note draft in weclapp: read the invoices first, create only with the dialog's confirmation and total.
+  app.post("/api/w/:ws/cases/:id/credit-note/lookup", async (req) => lookupCreditNote(ctx, await actor(req), (req.params as { id: string }).id));
+  app.post("/api/w/:ws/cases/:id/credit-note", async (req) => {
+    const body = parse(
+      z.object({
+        invoiceId: z.string().min(1).max(64), confirm: z.literal(true), expectedTotalCents: z.number().int().positive(), shipping: z.string().max(20).optional(),
+        lines: z.array(z.object({ itemId: z.string().min(1).max(64), amount: z.string().max(20) })).min(1).max(200),
+      }),
+      req.body,
+    );
+    return createCreditNote(ctx, await actor(req), (req.params as { id: string }).id, body);
+  });
+  app.post("/api/w/:ws/cases/:id/credit-note/:noteId/settle", async (req) => {
+    const p = req.params as { id: string; noteId: string };
+    await settleUncertainCreditNote(ctx, await actor(req), p.id, p.noteId, parse(z.object({ confirm: z.literal(true), outcome: z.enum(["exists", "none"]) }), req.body));
+    return { ok: true };
+  });
   app.post("/api/w/:ws/cases/:id/redraft", async (req) => {
     const body = parse(z.object({ decision: z.enum(["customer_right", "customer_wrong", "ask_customer"]) }), req.body);
     await requestRedraft(ctx, await actor(req), (req.params as { id: string }).id, body.decision);
@@ -519,6 +537,10 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
   app.put("/api/w/:ws/erp", async (req) => {
     const body = parse(z.object({ baseUrl: z.string().max(300), apiToken: z.string().max(500).optional(), searchFields: z.array(z.string()).max(5).optional() }), req.body);
     return { id: await upsertWeclappConnection(ctx, await actor(req), body) };
+  });
+  app.put("/api/w/:ws/erp/credit-notes", async (req) => {
+    await setCreditNotesEnabled(ctx, await actor(req), parse(z.object({ enabled: z.boolean() }), req.body).enabled);
+    return { ok: true };
   });
   app.post("/api/w/:ws/erp/check", async (req) => checkErp(ctx, await actor(req)));
   app.post("/api/w/:ws/connections", async (req) => {

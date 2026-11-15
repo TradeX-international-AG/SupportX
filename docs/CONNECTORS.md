@@ -104,6 +104,18 @@ Optional and off by default. A person gives the customer money back at the marke
 - **Assumptions to confirm on a live account:** that EU amounts are gross (item price incl. VAT, as the Orders API reports it) and Amazon does not expect a separate `Tax` component; behaviour on FBA orders (the card warns, Amazon often refunds FBA returns itself); time until the feed is processed.
 - **Tested:** only against `packages/testing/fake-amazon.ts`. **No live Amazon account has been connected for refunds.**
 
+### Credit note draft in weclapp (0.17.0)
+
+After a refund, a person prepares the credit note in weclapp from the case (card "Gutschrift in weclapp"). This is the only write SupportX makes to weclapp.
+
+- **API:** `GET /salesInvoice/id/{id}` (lines `salesInvoiceItems`, `shippingCostItems`), `POST /salesInvoice/id/{id}/createCreditNote` with `itemIds` (weclapp creates the credit note in status `NEW`, not booked), then `PUT /salesInvoice/id/{creditNoteId}` with the fresh full entity (weclapp replaces the whole record) where each line's `unitPrice` is scaled so its gross equals the confirmed amount (`manualUnitPrice: true`) and shipping cost items likewise (0 removes them). `createCreditNoteOpenItem` (booking) is never called. Endpoints from the weclapp v2 OpenAPI.
+- **Switch:** Settings → weclapp → "Gutschriften aus dem Fall als Entwurf anlegen" (owner only, `erp_connections.credit_notes_enabled`, audited). The weclapp user of the API token needs the right to create and change sales invoices; a read-only token gets 403, shown as "nicht angelegt".
+- **Proposal:** from Amazon refunds of the case (lines matched to invoice lines by article number = SKU, else title, else spread in proportion), otherwise from the amount on the refund list (spread over the lines, then shipping), otherwise the whole invoice. The person edits every amount before confirming.
+- **Checks:** signed-in owner or agent only; invoice must belong to the case's weclapp order, not be a credit note or cancelled; each line at most its gross, shipping at most the invoice's shipping, total at most the invoice minus earlier SupportX credit notes for it; total must equal the confirmed one; one open request per invoice (`erp_credit_notes`, advisory lock).
+- **States:** *Entwurf in weclapp*; *Beträge prüfen* (draft exists but the update failed or weclapp's total differs by rounding); *unklar* (no answer on the create call: check weclapp, then "Ist angelegt" / "Ist nicht angelegt"); *nicht angelegt*. The draft's number goes onto the refund list entry; ticking "done" stays with the person after booking in weclapp.
+- **Assumptions to confirm on the live tenant:** that `createCreditNote` creates status `NEW` and copies shipping cost items, that `creditedInvoiceItemId` links the new lines to the invoice lines, that a PUT echoing the read-only fields is accepted, and how unit prices behave with net price entry.
+- **Tested:** only against `packages/testing/fake-weclapp.ts`. A plentymarkets implementation would provide the same two provider methods (`getInvoiceForCredit`, `createCreditNoteDraft`).
+
 ### eBay, Kaufland, Shop Apotheke (not built yet)
 
 - **eBay:** Fulfillment API `POST /sell/fulfillment/v1/order/{order_id}/issue_refund` (full or partial, per order or line item, reason enum). Needs the additional OAuth scope `sell.finances`, so the seller must sign in again, and eBay requires digital signatures for this call for EU/UK sellers (signing key from the Key Management API, entered by the operator). See [EBAY-4](SOURCES.md#ebay).
