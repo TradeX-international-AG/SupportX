@@ -8,7 +8,7 @@ import { one, withTx, type Tx } from "../storage/db.ts";
 import { audit } from "./audit.ts";
 import { loadErpConnection, orderProviderFor, type ChannelKind } from "./connections.ts";
 import { requireRole, ServiceError, type Actor, type AppContext } from "./context.ts";
-import { applyDraftDocuments, MAX_DOCUMENT_BYTES, MAX_REPLY_DOCUMENTS, REPLY_FILES, storeCaseFile, type CaseFileInfo } from "./documents.ts";
+import { attachToNewDraft, MAX_DOCUMENT_BYTES, MAX_REPLY_DOCUMENTS, REPLY_FILES, storeCaseFile, supersedeOpenDrafts, type CaseFileInfo } from "./documents.ts";
 import { ALL_ORDERS } from "./matching.ts";
 import { approveByRule, queueReply, sendBlockers } from "./replies.ts";
 
@@ -174,7 +174,7 @@ export async function draftInvoiceReply(ctx: AppContext, actor: Actor, conversat
     const locked = await one<{ version: number; latest_inbound_message_id: string | null }>(tx, "SELECT version, latest_inbound_message_id FROM conversations WHERE workspace_id = $1 AND id = $2 FOR UPDATE", [actor.workspaceId, conversationId]);
     if (!locked || locked.latest_inbound_message_id !== conv.latest_inbound_message_id) throw new ServiceError(409, "VERSION_CONFLICT", "Inzwischen ist eine neue Kundennachricht da. Bitte neu laden.");
     const files = await storeInvoices(tx, actor, conversationId, loaded);
-    await tx.query("UPDATE drafts SET status = 'superseded', updated_at = now() WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited')", [actor.workspaceId, conversationId]);
+    const previousFiles = await supersedeOpenDrafts(tx, actor.workspaceId, conversationId);
     const draft = await one<{ id: string; version: number }>(
       tx,
       `INSERT INTO drafts (workspace_id, conversation_id, based_on_conversation_version, inbound_message_id, order_link_id, intent, summary, body,
@@ -186,7 +186,8 @@ export async function draftInvoiceReply(ctx: AppContext, actor: Actor, conversat
       ],
     );
     await audit(tx, actor, "draft.invoice", "draft", draft!.id, { invoices: invoices.map((i) => i.invoiceNumber ?? i.id), attached });
-    if (attached) await applyDraftDocuments(tx, actor, draft!.id, files.map((f) => f.id), draft!.version);
+    // The invoice first, then files a person attached for this reply or to the replaced draft.
+    if (attached) await attachToNewDraft(tx, actor.workspaceId, conversationId, draft!.id, { first: files.map((f) => f.id), previous: previousFiles });
     return { draftId: draft!.id, files, attached };
   });
 }

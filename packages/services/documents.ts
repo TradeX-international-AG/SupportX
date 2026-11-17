@@ -12,10 +12,10 @@ const UUID = /^[0-9a-f-]{36}$/i;
 
 /** Whether a reply over this connection can carry files, and what to do otherwise. */
 export const REPLY_FILES: Record<ChannelKind, { supported: boolean; note: string }> = {
-  // Amazon, DocMorris, Shopify and other mail answers go out as a mail reply with the PDF attached.
-  microsoft_graph: { supported: true, note: "Die PDF geht als Anhang der Antwortmail raus. Amazon leitet PDF-Anhänge an den Käufer weiter." },
-  kaufland_tickets: { supported: true, note: "Die PDF wird an die Ticket-Nachricht bei Kaufland angehängt." },
-  mirakl_inbox: { supported: true, note: "Die PDF wird an die Nachricht bei Shop Apotheke angehängt." },
+  // Amazon, DocMorris, Shopify and other mail answers go out as a mail reply with the file attached.
+  microsoft_graph: { supported: true, note: "Die Datei geht als Anhang der Antwortmail raus. Amazon leitet PDF-, JPG- und PNG-Anhänge an den Käufer weiter." },
+  kaufland_tickets: { supported: true, note: "Die Datei wird an die Ticket-Nachricht bei Kaufland angehängt." },
+  mirakl_inbox: { supported: true, note: "Die Datei wird an die Nachricht bei Shop Apotheke angehängt." },
   ebay_messages: { supported: false, note: "eBay nimmt in Nachrichten keine Dateien an. Ausweg: die Datei hier herunterladen und im eBay-Verkäuferportal bei der Bestellung bzw. Nachricht selbst hochladen, oder die wichtigsten Punkte in die Antwort schreiben." },
 };
 
@@ -32,6 +32,7 @@ export interface CaseFileInfo {
   size: number;
   content_type: string;
   source: "upload" | "erp_invoice";
+  for_next_reply: boolean;
   created_at: Date;
 }
 
@@ -163,13 +164,13 @@ export async function storeCaseFile(
   tx: Tx,
   actor: Actor,
   conversationId: string,
-  file: { name: string; contentType: string; data: Buffer; source: "upload" | "erp_invoice"; externalRef?: string },
+  file: { name: string; contentType: string; data: Buffer; source: "upload" | "erp_invoice"; externalRef?: string; forNextReply?: boolean },
 ): Promise<CaseFileInfo> {
   const row = await one<CaseFileInfo>(
     tx,
-    `INSERT INTO documents (workspace_id, conversation_id, source, external_ref, name, content_type, size, sha256, data, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, name, size, content_type, source, created_at`,
-    [actor.workspaceId, conversationId, file.source, file.externalRef ?? null, file.name, file.contentType, file.data.length, createHash("sha256").update(file.data).digest("hex"), file.data, actorId(actor)],
+    `INSERT INTO documents (workspace_id, conversation_id, source, external_ref, name, content_type, size, sha256, data, created_by, for_next_reply)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, name, size, content_type, source, for_next_reply, created_at`,
+    [actor.workspaceId, conversationId, file.source, file.externalRef ?? null, file.name, file.contentType, file.data.length, createHash("sha256").update(file.data).digest("hex"), file.data, actorId(actor), file.forNextReply ?? false],
   );
   await audit(tx, actor, file.source === "erp_invoice" ? "case_file.invoice_fetched" : "case_file.uploaded", "conversation", conversationId, { name: row!.name, size: row!.size });
   return row!;
@@ -193,11 +194,96 @@ export async function attachUploadedFile(ctx: AppContext, actor: Actor, draftId:
   });
 }
 
+/**
+ * "Datei anhängen" in the answer box before a reply is written. If a draft is open,
+ * the file goes straight onto it. Otherwise it waits with the case and goes onto the
+ * next draft, whichever decision writes it ("Kunde hat recht", "Individuell", …).
+ */
+export async function uploadReplyFile(ctx: AppContext, actor: Actor, conversationId: string, input: { name: string; data: Buffer }): Promise<{ file: CaseFileInfo; draftId: string | null }> {
+  requireRole(actor, ["owner", "agent"]);
+  if (!UUID.test(conversationId)) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
+  const checked = checkCaseFile(input.name, input.data);
+  return withTx(ctx.db, async (tx) => {
+    const conv = await one<{ kind: ChannelKind }>(
+      tx,
+      `SELECT cc.kind FROM conversations c JOIN channel_connections cc ON cc.workspace_id = c.workspace_id AND cc.id = c.connection_id
+        WHERE c.workspace_id = $1 AND c.id = $2 FOR UPDATE OF c`,
+      [actor.workspaceId, conversationId],
+    );
+    if (!conv) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
+    if (!REPLY_FILES[conv.kind].supported) throw new ServiceError(409, "NOT_SUPPORTED", REPLY_FILES[conv.kind].note);
+    const open = await one<{ id: string; version: number }>(tx, "SELECT id, version FROM drafts WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited') ORDER BY created_at DESC LIMIT 1", [actor.workspaceId, conversationId]);
+    if (open) {
+      const draft = await lockDraft(tx, actor, open.id, open.version);
+      if (draft.document_ids.length >= MAX_REPLY_DOCUMENTS) throw new ServiceError(400, "TOO_MANY", `Höchstens ${MAX_REPLY_DOCUMENTS} Anhänge je Antwort.`);
+      const file = await storeCaseFile(tx, actor, conversationId, { ...checked, data: input.data, source: "upload" });
+      await applyDraftDocuments(tx, actor, open.id, [...draft.document_ids, file.id], open.version, draft);
+      return { file, draftId: open.id };
+    }
+    const waiting = await many<{ size: number }>(tx, "SELECT size FROM documents WHERE workspace_id = $1 AND conversation_id = $2 AND for_next_reply AND deleted_at IS NULL", [actor.workspaceId, conversationId]);
+    if (waiting.length >= MAX_REPLY_DOCUMENTS) throw new ServiceError(400, "TOO_MANY", `Höchstens ${MAX_REPLY_DOCUMENTS} Anhänge je Antwort.`);
+    if (waiting.reduce((sum, d) => sum + d.size, 0) + input.data.length > MAX_DOCUMENT_BYTES) throw new ServiceError(413, "TOO_LARGE", "Zusammen sind die Anhänge zu groß (höchstens 3 MB je Antwort). Bitte weniger anhängen.");
+    const file = await storeCaseFile(tx, actor, conversationId, { ...checked, data: input.data, source: "upload", forNextReply: true });
+    return { file, draftId: null };
+  });
+}
+
+/** Take back a file that waits for the next reply (it was uploaded only for that). */
+export async function removeWaitingFile(ctx: AppContext, actor: Actor, conversationId: string, fileId: string): Promise<void> {
+  requireRole(actor, ["owner", "agent"]);
+  if (!UUID.test(conversationId) || !UUID.test(fileId)) throw new ServiceError(404, "NOT_FOUND", "Datei nicht gefunden.");
+  const row = await one(ctx.db, "UPDATE documents SET deleted_at = now(), for_next_reply = false WHERE workspace_id = $1 AND conversation_id = $2 AND id = $3 AND for_next_reply AND deleted_at IS NULL RETURNING id", [actor.workspaceId, conversationId, fileId]);
+  if (!row) throw new ServiceError(404, "NOT_FOUND", "Datei nicht gefunden.");
+  await audit(ctx.db, actor, "case_file.removed", "conversation", conversationId, { fileId });
+}
+
+/**
+ * Supersede the open draft of a case and return its files, so a new decision does not
+ * silently drop what a person attached.
+ */
+export async function supersedeOpenDrafts(tx: Tx, workspaceId: string, conversationId: string): Promise<string[]> {
+  const rows = await many<{ document_ids: string[] | null }>(tx, "UPDATE drafts SET status = 'superseded', updated_at = now() WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited') RETURNING document_ids", [workspaceId, conversationId]);
+  return rows.flatMap((r) => r.document_ids ?? []);
+}
+
+/**
+ * Files for a freshly written draft: first the given ones (e.g. the invoice), then the
+ * files waiting for the next reply, then those of the draft it replaces. Kept within the
+ * per-reply limits; whatever does not fit stays with the case to pick again.
+ */
+export async function attachToNewDraft(tx: Tx, workspaceId: string, conversationId: string, draftId: string, input: { first?: string[]; previous?: string[] } = {}): Promise<string[]> {
+  const conv = await one<{ kind: ChannelKind }>(
+    tx,
+    "SELECT cc.kind FROM conversations c JOIN channel_connections cc ON cc.workspace_id = c.workspace_id AND cc.id = c.connection_id WHERE c.workspace_id = $1 AND c.id = $2",
+    [workspaceId, conversationId],
+  );
+  if (!conv || !REPLY_FILES[conv.kind].supported) return [];
+  const waiting = await many<{ id: string }>(tx, "SELECT id FROM documents WHERE workspace_id = $1 AND conversation_id = $2 AND for_next_reply AND deleted_at IS NULL ORDER BY created_at", [workspaceId, conversationId]);
+  const wanted = [...new Set([...(input.first ?? []), ...waiting.map((w) => w.id), ...(input.previous ?? [])])];
+  if (wanted.length === 0) return [];
+  const rows = await many<{ id: string; size: number }>(
+    tx,
+    "SELECT id, size FROM documents WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL AND (conversation_id IS NULL OR conversation_id = $3)",
+    [workspaceId, wanted, conversationId],
+  );
+  const chosen: string[] = [];
+  let bytes = 0;
+  for (const id of wanted) {
+    const row = rows.find((r) => r.id === id);
+    if (!row || chosen.length >= MAX_REPLY_DOCUMENTS || bytes + row.size > MAX_DOCUMENT_BYTES) continue;
+    chosen.push(id);
+    bytes += row.size;
+  }
+  await tx.query("UPDATE drafts SET document_ids = $3::uuid[] WHERE workspace_id = $1 AND id = $2", [workspaceId, draftId, chosen]);
+  if (waiting.length) await tx.query("UPDATE documents SET for_next_reply = false WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [workspaceId, waiting.map((w) => w.id)]);
+  return chosen;
+}
+
 export async function listCaseFiles(ctx: AppContext, actor: Actor, conversationId: string): Promise<CaseFileInfo[]> {
   if (!UUID.test(conversationId)) return [];
   return many<CaseFileInfo>(
     ctx.db,
-    "SELECT id, name, size, content_type, source, created_at FROM documents WHERE workspace_id = $1 AND conversation_id = $2 AND deleted_at IS NULL ORDER BY created_at",
+    "SELECT id, name, size, content_type, source, for_next_reply, created_at FROM documents WHERE workspace_id = $1 AND conversation_id = $2 AND deleted_at IS NULL ORDER BY created_at",
     [actor.workspaceId, conversationId],
   );
 }

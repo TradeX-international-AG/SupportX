@@ -14,7 +14,7 @@ import { RulesProvider } from "../ai/rules.ts";
 import { many, one, withTx, type Queryable, type Tx } from "../storage/db.ts";
 import { audit } from "./audit.ts";
 import { channelFor, loadChannelConnection } from "./connections.ts";
-import { outboxAttachments } from "./documents.ts";
+import { attachToNewDraft, outboxAttachments, supersedeOpenDrafts } from "./documents.ts";
 import { actorId, requireRole, ServiceError, type Actor, type AppContext } from "./context.ts";
 import { enqueue } from "./jobs.ts";
 
@@ -151,7 +151,7 @@ export async function generateDraft(ctx: AppContext, workspaceId: string, conver
     const locked = await loadConversation(tx, workspaceId, conversationId, true);
     // A newer message arrived while the model was working: that message has its own job.
     if (locked.version !== conv.version || locked.latest_inbound_message_id !== conv.latest_inbound_message_id) return null;
-    await tx.query("UPDATE drafts SET status = 'superseded', updated_at = now() WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited')", [workspaceId, conversationId]);
+    const previousFiles = await supersedeOpenDrafts(tx, workspaceId, conversationId);
     const draft = await one<{ id: string }>(
       tx,
       `INSERT INTO drafts (workspace_id, conversation_id, based_on_conversation_version, inbound_message_id, order_link_id, intent, summary, body,
@@ -164,6 +164,7 @@ export async function generateDraft(ctx: AppContext, workspaceId: string, conver
         JSON.stringify(issues), generatedBy, model, promptVersion, decision ?? null,
       ],
     );
+    await attachToNewDraft(tx, workspaceId, conversationId, draft!.id, { previous: previousFiles });
     await tx.query("UPDATE conversations SET last_error = $3 WHERE workspace_id = $1 AND id = $2", [workspaceId, conversationId, providerNote]);
     // An AI draft refines the topic sorted on arrival; a person's choice stays.
     if (generatedBy !== "rules") await tx.query("UPDATE conversations SET topic = $3, topic_source = 'ai' WHERE workspace_id = $1 AND id = $2 AND topic_source IS DISTINCT FROM 'person'", [workspaceId, conversationId, proposal.intent]);
@@ -241,7 +242,7 @@ export async function composeDraft(ctx: AppContext, actor: Actor, conversationId
   const body = provider.polish ? text : ["Guten Tag,", "", text, "", ws.reply_signature].join("\n");
   const issues = checkDraft({ text: body, citedFactIds: [], facts, order, orderStatus: orderStatusForAi(conv.order_match_status), allowedLinkPrefixes: ws.allowed_link_prefixes, sourcePlatform: conv.source_platform });
   const draft = await withTx(ctx.db, async (tx) => {
-    await tx.query("UPDATE drafts SET status = 'superseded', updated_at = now() WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited')", [actor.workspaceId, conversationId]);
+    const previousFiles = await supersedeOpenDrafts(tx, actor.workspaceId, conversationId);
     const row = await one<{ id: string; version: number }>(
       tx,
       `INSERT INTO drafts (workspace_id, conversation_id, based_on_conversation_version, inbound_message_id, order_link_id, intent, summary, body,
@@ -249,6 +250,7 @@ export async function composeDraft(ctx: AppContext, actor: Actor, conversationId
        VALUES ($1,$2,$3,$4,$5,'other','Antwort nach Vorgabe des Teams.',$6,'{}',$7,'[]','["none"]',$8,$9,'person',NULL,NULL,'custom') RETURNING id, version`,
       [actor.workspaceId, conversationId, conv.version, conv.latest_inbound_message_id, linkId, body, JSON.stringify(facts), detectRisks(text), JSON.stringify(issues)],
     );
+    await attachToNewDraft(tx, actor.workspaceId, conversationId, row!.id, { previous: previousFiles });
     await audit(tx, actor, "draft.composed", "draft", row!.id, {});
     return row!;
   });
@@ -291,7 +293,7 @@ export async function snippetDraft(ctx: AppContext, actor: Actor, conversationId
     if (locked.latest_inbound_message_id !== conv.latest_inbound_message_id) throw new ServiceError(409, "VERSION_CONFLICT", "Inzwischen ist eine neue Kundennachricht da. Bitte neu laden.");
     // The topic stays what an earlier draft recognised; a text block does not classify.
     const earlier = await one<{ intent: string }>(tx, "SELECT intent FROM drafts WHERE workspace_id = $1 AND conversation_id = $2 ORDER BY created_at DESC LIMIT 1", [actor.workspaceId, conversationId]);
-    await tx.query("UPDATE drafts SET status = 'superseded', updated_at = now() WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited')", [actor.workspaceId, conversationId]);
+    const previousFiles = await supersedeOpenDrafts(tx, actor.workspaceId, conversationId);
     const row = await one<{ id: string }>(
       tx,
       `INSERT INTO drafts (workspace_id, conversation_id, based_on_conversation_version, inbound_message_id, order_link_id, intent, summary, body,
@@ -300,6 +302,7 @@ export async function snippetDraft(ctx: AppContext, actor: Actor, conversationId
       [actor.workspaceId, conversationId, locked.version, locked.latest_inbound_message_id, linkId, `Textbaustein „${rendered.title}“.`, rendered.text,
         JSON.stringify(facts), risks, JSON.stringify(issues), earlier?.intent ?? "other"],
     );
+    await attachToNewDraft(tx, actor.workspaceId, conversationId, row!.id, { previous: previousFiles });
     await audit(tx, actor, "draft.snippet", "draft", row!.id, { snippetId, missing: rendered.missing });
     return row!.id;
   });

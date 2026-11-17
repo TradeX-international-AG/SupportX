@@ -349,6 +349,13 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
                   const missing = (r as { missing: string[] }).missing;
                   return missing.length ? `Textbaustein übernommen. Ohne Wert geblieben: ${missing.map((m) => `{${m}}`).join(", ")}. Bitte im Entwurf ausfüllen.` : "Textbaustein übernommen. Bitte lesen und senden.";
                 })}
+                files={{
+                  waiting: (data.caseFiles ?? []).filter((f) => f.for_next_reply),
+                  replyFiles: data.replyFiles ?? { supported: false, note: "" },
+                  base: `${base}/documents`,
+                  onUpload: (file) => act(async () => api("POST", `${base}/cases/${caseId}/files`, { name: file.name, dataBase64: await readBase64(file) }), "Datei angehängt. Sie geht mit der Antwort raus, sobald du entschieden hast."),
+                  onRemove: (id) => act(() => api("DELETE", `${base}/cases/${caseId}/files/${id}`), "Anhang entfernt."),
+                }}
                 onCompose={(instruction) => act(() => api("POST", `${base}/cases/${caseId}/compose`, { instruction }), (data.writer ?? "rules") !== "rules" ? "Ausformuliert. Bitte noch einmal lesen und dann senden." : "Als Antwort übernommen. Bitte noch einmal lesen und dann senden.")}
               />
             )}
@@ -1163,9 +1170,10 @@ const WRITER_NOTE: Record<string, string> = {
 };
 
 /** First a person decides, then the reply is written: nothing is generated (or paid for) on its own. */
-function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUnique, onInvoice, onDecide, onCompose, snippets, onSnippet }: {
+function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUnique, onInvoice, onDecide, onCompose, snippets, onSnippet, files }: {
   current: string | null; hasDraft: boolean; writer: string; pendingOrder: boolean; invoices: string[]; orderUnique: boolean; onInvoice: () => void; onDecide: (decision: string) => void; onCompose: (instruction: string) => void;
   snippets: SnippetInfo[]; onSnippet: (snippetId: string) => void;
+  files: { waiting: CaseFile[]; replyFiles: { supported: boolean; note: string }; base: string; onUpload: (file: File) => void; onRemove: (id: string) => void };
 }) {
   const [fetching, setFetching] = useState(false);
   const [custom, setCustom] = useState(false);
@@ -1209,6 +1217,7 @@ function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUniq
           </div>
         </form>
       )}
+      {!hasDraft && <WaitingFiles {...files} />}
       <p className="small muted">{WRITER_NOTE[writer] ?? WRITER_NOTE.rules}</p>
     </div>
   );
@@ -1323,7 +1332,7 @@ function FollowUp({ value, onSet }: { value: string | null; onSet: (iso: string 
 
 const fmtSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-interface CaseFile { id: string; name: string; size: number; content_type: string; source: "upload" | "erp_invoice" }
+interface CaseFile { id: string; name: string; size: number; content_type: string; source: "upload" | "erp_invoice"; for_next_reply?: boolean }
 
 const MAX_FILE = 3 * 1024 * 1024;
 
@@ -1334,6 +1343,57 @@ function readBase64(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("Die Datei konnte nicht gelesen werden."));
     reader.readAsDataURL(file);
   });
+}
+
+/** Accepted by every channel that takes files; the server checks the content again. */
+const FILE_ACCEPT = "application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png";
+
+/**
+ * "Datei anhängen" before a reply is written: the file waits with the case and goes
+ * onto the next reply, whichever decision writes it.
+ */
+function WaitingFiles({ waiting, replyFiles, base, onUpload, onRemove }: { waiting: CaseFile[]; replyFiles: { supported: boolean; note: string }; base: string; onUpload: (file: File) => void; onRemove: (id: string) => void }) {
+  const [tooBig, setTooBig] = useState(false);
+  if (!replyFiles.supported) {
+    return (
+      <div className="draft-files small">
+        <strong>Anhang</strong>
+        <button disabled title={replyFiles.note}>Datei anhängen</button>
+        <span className="muted">{replyFiles.note}</span>
+      </div>
+    );
+  }
+  const used = waiting.reduce((sum, f) => sum + f.size, 0);
+  return (
+    <div className="draft-files small">
+      <strong>Anhang</strong>
+      {waiting.map((f) => (
+        <span key={f.id} className="file-chip">
+          <a href={`${base}/${f.id}`} download>{f.name}</a> <span className="muted">({fmtSize(f.size)})</span>
+          <button className="link" onClick={() => onRemove(f.id)} aria-label={`${f.name} entfernen`}>entfernen</button>
+        </span>
+      ))}
+      {waiting.length < 3 && (
+        <label className="file-pick" title="PDF, JPG oder PNG, zusammen höchstens 3 MB je Antwort">
+          <input
+            type="file"
+            accept={FILE_ACCEPT}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              if (used + file.size > MAX_FILE) { setTooBig(true); return; }
+              setTooBig(false);
+              onUpload(file);
+            }}
+          />
+          <span className="button">Datei anhängen</span>
+        </label>
+      )}
+      {tooBig && <span className="error">Zu groß: höchstens 3 MB je Antwort, alle Anhänge zusammen.</span>}
+      <span className="muted">{waiting.length ? "Geht mit der nächsten Antwort raus, egal welche Entscheidung du wählst. " : "PDF, JPG oder PNG, bis 3 Dateien. "}{replyFiles.note}</span>
+    </div>
+  );
 }
 
 /**
@@ -1379,7 +1439,7 @@ function DraftFiles({ draft, canEdit, documents, caseFiles, replyFiles, base, on
         <label className="file-pick" title="PDF, JPG oder PNG, höchstens 3 MB; gilt nur für diese Antwort">
           <input
             type="file"
-            accept="application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png"
+            accept={FILE_ACCEPT}
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = "";

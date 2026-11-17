@@ -42,7 +42,7 @@ import { enqueue } from "../../packages/services/jobs.ts";
 import { linkOrderManually, refreshOrderLink, setConversationAccount } from "../../packages/services/matching.ts";
 import { getMessageAttachment, listMessageAttachments } from "../../packages/services/attachments.ts";
 import { forwardMessage, getForwardInfo, resolveForward } from "../../packages/services/forwards.ts";
-import { attachUploadedFile, deleteDocument, getDocument, listDocuments, setDraftDocuments, uploadDocument } from "../../packages/services/documents.ts";
+import { attachUploadedFile, deleteDocument, getDocument, listDocuments, removeWaitingFile, setDraftDocuments, uploadDocument, uploadReplyFile } from "../../packages/services/documents.ts";
 import { draftInvoiceReply, fetchCaseInvoices } from "../../packages/services/invoices.ts";
 import { deleteLogo, getLogo, logoVersion, previewDesign, resetDesign, saveDesign, saveLogo, workspaceTheme } from "../../packages/services/design.ts";
 import { writeDesignMd, type WorkspaceTheme } from "../../packages/core/design-md.ts";
@@ -399,6 +399,16 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
   app.post("/api/w/:ws/drafts/:id/files", { bodyLimit: 4_500_000 }, async (req) => {
     const body = parse(z.object({ name: z.string().min(1).max(300), dataBase64: z.string().min(1).max(4_400_000), expectedVersion: z.number().int().positive() }), req.body);
     return attachUploadedFile(ctx, await actor(req), (req.params as { id: string }).id, { name: body.name, data: Buffer.from(body.dataBase64, "base64"), expectedVersion: body.expectedVersion });
+  });
+  // "Datei anhängen" in the answer box: onto the open draft, or waiting for the next reply.
+  app.post("/api/w/:ws/cases/:id/files", { bodyLimit: 4_500_000 }, async (req) => {
+    const body = parse(z.object({ name: z.string().min(1).max(300), dataBase64: z.string().min(1).max(4_400_000) }), req.body);
+    return uploadReplyFile(ctx, await actor(req), (req.params as { id: string }).id, { name: body.name, data: Buffer.from(body.dataBase64, "base64") });
+  });
+  app.delete("/api/w/:ws/cases/:id/files/:fileId", async (req) => {
+    const p = req.params as { id: string; fileId: string };
+    await removeWaitingFile(ctx, await actor(req), p.id, p.fileId);
+    return { ok: true };
   });
   // Workspace PDFs (e.g. return instructions) to attach to replies.
   app.get("/api/w/:ws/documents", async (req) => ({ documents: await listDocuments(ctx, await actor(req)) }));
