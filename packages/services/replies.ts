@@ -309,6 +309,59 @@ export async function snippetDraft(ctx: AppContext, actor: Actor, conversationId
   return { draftId, missing: rendered.missing };
 }
 
+/** Fixed text for "Bestellung erstatten": the refund is about to be made, never that it is done. */
+export function refundReplyText(lang: string, orderNumber: string | null, signature: string): string {
+  const en = lang.toLowerCase().startsWith("en");
+  const middle = en
+    ? [
+        "Thank you for your message, and please accept our apologies for the inconvenience.",
+        `We are refunding ${orderNumber ? `your order ${orderNumber}` : "your order"} right away. Depending on your payment method, it may take a few days until the amount shows on your account.`,
+      ]
+    : [
+        "vielen Dank für Ihre Nachricht und entschuldigen Sie bitte die Unannehmlichkeiten.",
+        `Wir erstatten Ihnen ${orderNumber ? `Ihre Bestellung ${orderNumber}` : "Ihre Bestellung"} umgehend. Je nach Zahlungsart kann es einige Tage dauern, bis der Betrag auf Ihrem Konto sichtbar ist.`,
+      ];
+  return [en ? "Hello," : "Guten Tag,", "", ...middle, "", signature].join("\n");
+}
+
+/**
+ * "Bestellung erstatten" was clicked: the reply tells the customer that the refund
+ * is made right away. Fixed template, no AI cost; sent only on a click on "Senden".
+ */
+export async function refundReplyDraft(ctx: AppContext, actor: Actor, conversationId: string): Promise<{ draftId: string }> {
+  requireRole(actor, ["owner", "agent"]);
+  const conv = await loadConversation(ctx.db, actor.workspaceId, conversationId);
+  if (!conv.latest_inbound_message_id) throw new ServiceError(409, "NO_MESSAGE", "In diesem Fall gibt es keine Kundennachricht zum Beantworten.");
+  const ws = (await one<WorkspaceRow>(ctx.db, "SELECT reply_signature, default_language, allowed_link_prefixes FROM workspaces WHERE id = $1", [actor.workspaceId]))!;
+  const { linkId, order } = await currentOrder(ctx.db, actor.workspaceId, conversationId);
+  const facts = [...(order ? buildOrderFacts(order) : []), ...(await caseCarrierFacts(ctx.db, actor.workspaceId, conversationId))];
+  const orderNumber = order ? (order.orderNumberAtCustomer ?? order.orderNumber ?? null) : null;
+  const body = refundReplyText(ws.default_language, orderNumber, ws.reply_signature);
+  const citedFactIds = order && facts.some((f) => f.id === "order") ? ["order"] : [];
+  const issues = checkDraft({ text: body, citedFactIds, facts, order, orderStatus: orderStatusForAi(conv.order_match_status), allowedLinkPrefixes: ws.allowed_link_prefixes, sourcePlatform: conv.source_platform });
+  const latest = await one<{ body_text: string }>(ctx.db, "SELECT body_text FROM messages WHERE workspace_id = $1 AND id = $2", [actor.workspaceId, conv.latest_inbound_message_id]);
+  const risks = detectRisks(newestEmailText(latest?.body_text ?? ""));
+  if (risks.includes("health")) issues.push({ severity: "warn", code: "HEALTH_REVIEW", message: "Gesundheitsbezogene Anfrage: bitte durch fachlich qualifiziertes Personal prüfen lassen." });
+  const draftId = await withTx(ctx.db, async (tx) => {
+    const locked = await loadConversation(tx, actor.workspaceId, conversationId, true);
+    if (locked.latest_inbound_message_id !== conv.latest_inbound_message_id) throw new ServiceError(409, "VERSION_CONFLICT", "Inzwischen ist eine neue Kundennachricht da. Bitte neu laden.");
+    const earlier = await one<{ intent: string }>(tx, "SELECT intent FROM drafts WHERE workspace_id = $1 AND conversation_id = $2 ORDER BY created_at DESC LIMIT 1", [actor.workspaceId, conversationId]);
+    const previousFiles = await supersedeOpenDrafts(tx, actor.workspaceId, conversationId);
+    const row = await one<{ id: string }>(
+      tx,
+      `INSERT INTO drafts (workspace_id, conversation_id, based_on_conversation_version, inbound_message_id, order_link_id, intent, summary, body,
+         cited_fact_ids, facts, missing_information, suggested_actions, risks, issues, generated_by, ai_model, prompt_version, decision)
+       VALUES ($1,$2,$3,$4,$5,$11,'Erstattung angekündigt („Bestellung erstatten“).',$6,$7,$8,'[]','["none"]',$9,$10,'rules',NULL,'refund-v1','refund') RETURNING id`,
+      [actor.workspaceId, conversationId, locked.version, locked.latest_inbound_message_id, linkId, body, citedFactIds,
+        JSON.stringify(facts), risks, JSON.stringify(issues), earlier?.intent ?? "other"],
+    );
+    await attachToNewDraft(tx, actor.workspaceId, conversationId, row!.id, { previous: previousFiles });
+    await audit(tx, actor, "draft.refund", "draft", row!.id, {});
+    return row!.id;
+  });
+  return { draftId };
+}
+
 /** Which writer this workspace uses: its own Claude key, the installation's Claude, or the free templates. */
 async function providerFor(ctx: AppContext, ws: Pick<WorkspaceRow, "ai_enabled" | "ai_secret_id">, workspaceId: string): Promise<AiProvider> {
   if (!ws.ai_enabled) return new RulesProvider();

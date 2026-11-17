@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
 import { getCase } from "../../packages/services/cases.ts";
 import type { ServiceError } from "../../packages/services/context.ts";
-import { composeDraft, polishDraft, requestRedraft } from "../../packages/services/replies.ts";
+import { composeDraft, polishDraft, refundReplyDraft, refundReplyText, requestRedraft } from "../../packages/services/replies.ts";
 import { drainJobs } from "../../packages/services/worker.ts";
 import { enqueue } from "../../packages/services/jobs.ts";
 import { many } from "../../packages/storage/db.ts";
+import { checkDraft } from "../../packages/core/draft-check.ts";
 import { caseByThread, closeDb, createHarness, currentDraft, loadDemoMails, seedWorkspace, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
@@ -40,6 +41,30 @@ describe("decision before the reply", () => {
     await requestRedraft(h.ctx, s.agent, conv.id, "customer_wrong");
     await drainJobs(h.ctx);
     assert.match((await currentDraft(h, s, conv.id))!.body, /sorgfältig geprüft/);
+  });
+
+  it("writes the refund reply when 'Bestellung erstatten' is clicked, without claiming the refund is done", async () => {
+    for (const lang of ["de", "en"]) {
+      const text = refundReplyText(lang, "302-1234567-1234567", "Ihr Team");
+      const issues = checkDraft({ text, citedFactIds: [], facts: [], order: null, orderStatus: "unique", allowedLinkPrefixes: [] });
+      assert.deepEqual(issues, [], `${lang}: ${JSON.stringify(issues)}`);
+    }
+    h = await createHarness();
+    const s = await seedWorkspace(h);
+    loadDemoMails(h.graph);
+    await enqueue(h.ctx.db, { workspaceId: s.workspaceId, type: "mail.sync", payload: { connectionId: s.connectionId }, dedupeKey: `mail.sync:${s.connectionId}` });
+    await drainJobs(h.ctx, { maxJobs: 500 });
+    const conv = await caseByThread(h, s, "conv-shopify-wrong");
+    await assert.rejects(refundReplyDraft(h.ctx, s.viewer, conv.id), (e: ServiceError) => e.code === "FORBIDDEN");
+    await requestRedraft(h.ctx, s.agent, conv.id, "customer_right");
+    await drainJobs(h.ctx);
+    await refundReplyDraft(h.ctx, s.agent, conv.id);
+    const draft = (await currentDraft(h, s, conv.id))!;
+    assert.match(draft.body, /erstatten Ihnen .* umgehend/);
+    const data = await getCase(h.ctx, s.agent, conv.id);
+    assert.equal((data.drafts[0] as { decision: string }).decision, "refund");
+    assert.equal(data.drafts.filter((d) => (d as { status: string }).status === "proposed" || (d as { status: string }).status === "edited").length, 1, "the earlier draft is replaced");
+    assert.ok(!(draft.issues as Array<{ severity: string }>).some((i) => i.severity === "block"), JSON.stringify(draft.issues));
   });
 
   it("rewrites the person's own text only with a language model and saves it as an edit", async () => {

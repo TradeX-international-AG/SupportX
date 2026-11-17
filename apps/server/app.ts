@@ -54,7 +54,7 @@ import { batchCandidates, sendMany } from "../../packages/services/batch.ts";
 import { supportReport } from "../../packages/services/reports.ts";
 import { addToRefundList, listRefunds, removeFromRefundList, setRefundDetails, setRefundDone } from "../../packages/services/refunds.ts";
 import { evidencePdf } from "../../packages/services/evidence.ts";
-import { composeDraft, discardDraft, editDraft, polishDraft, renderSnippet, requestRedraft, resolveUncertainSend, sendDraft, snippetDraft } from "../../packages/services/replies.ts";
+import { composeDraft, discardDraft, editDraft, polishDraft, refundReplyDraft, renderSnippet, requestRedraft, resolveUncertainSend, sendDraft, snippetDraft } from "../../packages/services/replies.ts";
 
 const SESSION_COOKIE = "supportx_session";
 const webDist = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "dist");
@@ -383,6 +383,8 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
   // "Rechnung herunterladen": invoice PDF(s) from weclapp kept with the case; sends nothing.
   app.post("/api/w/:ws/cases/:id/invoices/fetch", async (req) => fetchCaseInvoices(ctx, await actor(req), (req.params as { id: string }).id));
   app.post("/api/w/:ws/cases/:id/invoice-reply", async (req) => draftInvoiceReply(ctx, await actor(req), (req.params as { id: string }).id));
+  // "Bestellung erstatten": reply from a fixed template saying the refund is made right away; sent only on "Senden".
+  app.post("/api/w/:ws/cases/:id/refund-reply", async (req) => refundReplyDraft(ctx, await actor(req), (req.params as { id: string }).id));
   app.post("/api/w/:ws/cases/:id/compose", async (req) => {
     const body = parse(z.object({ instruction: z.string().min(1).max(5_000) }), req.body);
     return composeDraft(ctx, await actor(req), (req.params as { id: string }).id, body.instruction);

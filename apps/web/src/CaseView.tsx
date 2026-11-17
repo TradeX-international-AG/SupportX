@@ -407,6 +407,13 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
                 // Start the download right away; the file also stays in the list.
                 for (const f of r.files) { const a = document.createElement("a"); a.href = `${base}/documents/${f.id}`; a.download = f.name; a.click(); }
               }, "Rechnung aus weclapp geholt.")}
+              onRefundClicked={() => {
+                // The refund form opens in a new tab; here the reply to the customer is written at once.
+                if (!canEdit) return;
+                if (draft?.decision === "refund") return;
+                if (editing) { setNotice("Antwort nicht neu geschrieben: Im Entwurf sind ungespeicherte Änderungen."); return; }
+                void act(() => api("POST", `${base}/cases/${caseId}/refund-reply`), "Antwort geschrieben: Die Erstattung erfolgt umgehend. Bitte lesen und senden.");
+              }}
               onAttach={(fileId, on) => draft && act(() => api("PUT", `${base}/drafts/${draft.id}/documents`, { documentIds: on ? [...(draft.document_ids ?? []), fileId] : (draft.document_ids ?? []).filter((x) => x !== fileId), expectedVersion: draft.version }), on ? "Rechnung wird mit der Antwort gesendet. Bitte Antwort lesen und senden." : "Rechnung aus der Antwort genommen.")}
             />
           </section>
@@ -916,10 +923,10 @@ function RefundListStatus({ status, canEdit, onAdd }: { status: CaseData["refund
   );
 }
 
-function OrderPanel({ data, canEdit, onLink, onRefresh, invoiceFiles, documentBase, draft, replyFiles, onFetchInvoices, onAttach }: {
+function OrderPanel({ data, canEdit, onLink, onRefresh, invoiceFiles, documentBase, draft, replyFiles, onFetchInvoices, onAttach, onRefundClicked }: {
   data: CaseData; canEdit: boolean; onLink: (body: { reference?: string; candidateId?: string }) => void; onRefresh: () => Promise<void> | void;
   invoiceFiles: CaseFile[]; documentBase: string; draft: Draft | null; replyFiles: { supported: boolean; note: string };
-  onFetchInvoices: () => Promise<void> | void; onAttach: (fileId: string, on: boolean) => void;
+  onFetchInvoices: () => Promise<void> | void; onAttach: (fileId: string, on: boolean) => void; onRefundClicked: () => void;
 }) {
   const [fetching, setFetching] = useState(false);
   const [reference, setReference] = useState("");
@@ -952,6 +959,7 @@ function OrderPanel({ data, canEdit, onLink, onRefresh, invoiceFiles, documentBa
         <OrderDetails
           order={order}
           refund={data.refund}
+          onRefundClicked={onRefundClicked}
           check={data.returnCheck ?? null}
           returns={<><ReturnBox order={order} canEdit={canEdit} onRefresh={onRefresh} />{data.returnCheck?.applicable && <ReturnCheckBox check={data.returnCheck} />}</>}
           links={orderLinks({
@@ -1102,7 +1110,7 @@ function WeightBox({ order }: { order: OrderSnapshot }) {
   );
 }
 
-function OrderDetails({ order, links, invoices, returns, refund, check }: { order: OrderSnapshot; links: OrderLink[]; invoices: React.ReactNode; returns: React.ReactNode; refund?: RefundDue; check?: ReturnCheck | null }) {
+function OrderDetails({ order, links, invoices, returns, refund, check, onRefundClicked }: { order: OrderSnapshot; links: OrderLink[]; invoices: React.ReactNode; returns: React.ReactNode; refund?: RefundDue; check?: ReturnCheck | null; onRefundClicked: () => void }) {
   const due = refund?.state === "due";
   const blockers = check?.findings.filter((f) => f.tone === "bad") ?? [];
   const hasRefundLink = links.some((l) => l.kind === "refund");
@@ -1121,7 +1129,8 @@ function OrderDetails({ order, links, invoices, returns, refund, check }: { orde
         <div className="row wrap order-links">
           {links.map((l) => (
             <a key={l.href} className={l.kind === "refund" && due ? "button refund-due" : "button"} href={l.href} target="_blank" rel="noopener noreferrer"
-              title={l.kind === "refund" && due ? "Ware ist zurück, Erstattung ist noch offen." : undefined}>
+              onClick={l.kind === "refund" ? onRefundClicked : undefined}
+              title={l.kind === "refund" ? `${due ? "Ware ist zurück, Erstattung ist noch offen. " : ""}Öffnet die Erstattung im Marktplatz und schreibt unten die Antwort, dass umgehend erstattet wird.` : undefined}>
               {l.label} ↗
             </a>
           ))}
@@ -1168,7 +1177,7 @@ function OrderDetails({ order, links, invoices, returns, refund, check }: { orde
   );
 }
 
-const DECISION_LABEL: Record<string, string> = { customer_right: "Kunde hat recht", customer_wrong: "Kunde hat nicht recht", ask_customer: "Erst nachfragen", custom: "Individuell", invoice: "Rechnung senden" };
+const DECISION_LABEL: Record<string, string> = { customer_right: "Kunde hat recht", customer_wrong: "Kunde hat nicht recht", ask_customer: "Erst nachfragen", custom: "Individuell", invoice: "Rechnung senden", refund: "Bestellung erstatten" };
 const WRITER_NOTE: Record<string, string> = {
   own_key: "Die Antwort schreibt Claude über euren Schlüssel. Jeder Klick kostet Claude-Guthaben.",
   installation: "Die Antwort schreibt Claude. Jeder Klick kostet Claude-Guthaben.",
@@ -1190,7 +1199,7 @@ function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUniq
     <div className="decision">
       <p className="small"><strong>{hasDraft ? "Andere Entscheidung? Dann wird die Antwort neu geschrieben." : "Erst entscheiden, dann wird die Antwort geschrieben."}</strong>{pendingOrder ? " Die Bestellung wird noch gesucht." : ""}</p>
       <div className="row wrap">
-        {Object.entries(DECISION_LABEL).filter(([key]) => key !== "custom" && key !== "invoice").map(([key, label]) => (
+        {Object.entries(DECISION_LABEL).filter(([key]) => key !== "custom" && key !== "invoice" && key !== "refund").map(([key, label]) => (
           <button key={key} className={current === key ? "primary" : key === "customer_right" && !hasDraft ? "primary" : ""} onClick={() => onDecide(key)}>{label}</button>
         ))}
         <button className={custom || current === "custom" ? "primary" : ""} aria-expanded={custom} onClick={() => setCustom(!custom)}>Individuell</button>
