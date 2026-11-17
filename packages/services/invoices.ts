@@ -8,7 +8,7 @@ import { one, withTx, type Tx } from "../storage/db.ts";
 import { audit } from "./audit.ts";
 import { loadErpConnection, orderProviderFor, type ChannelKind } from "./connections.ts";
 import { requireRole, ServiceError, type Actor, type AppContext } from "./context.ts";
-import { attachToNewDraft, MAX_DOCUMENT_BYTES, MAX_REPLY_DOCUMENTS, REPLY_FILES, storeCaseFile, supersedeOpenDrafts, type CaseFileInfo } from "./documents.ts";
+import { applyDraftDocuments, attachToNewDraft, checkWaitingRoom, lockCaseForFiles, lockDraft, openDraftOf, MAX_DOCUMENT_BYTES, MAX_REPLY_DOCUMENTS, REPLY_FILES, storeCaseFile, supersedeOpenDrafts, type CaseFileInfo } from "./documents.ts";
 import { ALL_ORDERS } from "./matching.ts";
 import { approveByRule, queueReply, sendBlockers } from "./replies.ts";
 
@@ -106,7 +106,7 @@ async function storeInvoices(tx: Tx, actor: Actor, conversationId: string, loade
   for (const { invoice, data } of loaded.pdfs) {
     const same = await one<CaseFileInfo>(
       tx,
-      `SELECT id, name, size, content_type, source, created_at FROM documents
+      `SELECT id, name, size, content_type, source, for_next_reply, created_at FROM documents
         WHERE workspace_id = $1 AND conversation_id = $2 AND source = 'erp_invoice' AND external_ref = $3 AND sha256 = $4 AND deleted_at IS NULL`,
       [actor.workspaceId, conversationId, invoice.id, createHash("sha256").update(data).digest("hex")],
     );
@@ -126,6 +126,38 @@ export async function fetchCaseInvoices(ctx: AppContext, actor: Actor, conversat
   if (!conv) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
   const loaded = await loadInvoicePdfs(ctx, actor, conversationId);
   return { files: await withTx(ctx.db, (tx) => storeInvoices(tx, actor, conversationId, loaded)) };
+}
+
+/**
+ * "Rechnung anhängen" from the template choice in the answer box: the invoice PDF(s)
+ * of the linked order from weclapp, onto the open draft or waiting for the next reply.
+ * Only the text the person writes goes with it; nothing is sent here.
+ */
+export async function attachCaseInvoices(ctx: AppContext, actor: Actor, conversationId: string): Promise<{ files: CaseFileInfo[]; draftId: string | null }> {
+  requireRole(actor, ["owner", "agent"]);
+  if (!UUID.test(conversationId)) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
+  const conv = await one<{ kind: ChannelKind }>(ctx.db, "SELECT cc.kind FROM conversations c JOIN channel_connections cc ON cc.workspace_id = c.workspace_id AND cc.id = c.connection_id WHERE c.workspace_id = $1 AND c.id = $2", [actor.workspaceId, conversationId]);
+  if (!conv) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
+  if (!REPLY_FILES[conv.kind].supported) throw new ServiceError(409, "NOT_SUPPORTED", REPLY_FILES[conv.kind].note);
+  const loaded = await loadInvoicePdfs(ctx, actor, conversationId);
+  return withTx(ctx.db, async (tx) => {
+    await lockCaseForFiles(tx, actor, conversationId);
+    const files = await storeInvoices(tx, actor, conversationId, loaded);
+    const ids = files.map((f) => f.id);
+    const open = await openDraftOf(tx, actor, conversationId);
+    if (open) {
+      const draft = await lockDraft(tx, actor, open.id, open.version);
+      const wanted = [...new Set([...draft.document_ids, ...ids])];
+      if (wanted.length !== draft.document_ids.length) await applyDraftDocuments(tx, actor, open.id, wanted, open.version, draft);
+      return { files, draftId: open.id };
+    }
+    const fresh = files.filter((f) => !f.for_next_reply);
+    if (fresh.length) {
+      await checkWaitingRoom(tx, actor, conversationId, fresh.reduce((sum, f) => sum + f.size, 0), fresh.length);
+      await tx.query("UPDATE documents SET for_next_reply = true WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [actor.workspaceId, fresh.map((f) => f.id)]);
+    }
+    return { files, draftId: null };
+  });
 }
 
 /**

@@ -985,7 +985,7 @@ function DocumentsCard({ base, owner }: { base: string; owner: boolean }) {
     <section className="card">
       <h3>Dokumente</h3>
       <p className="muted small">{count === 0 ? "Noch keine PDFs" : `${count} ${count === 1 ? "PDF" : "PDFs"} hinterlegt`}</p>
-      <p className="muted small">PDFs, die ihr oft mitschickt, z. B. die Anleitung für Retouren. Im Fall wählst du sie unter der Antwort mit „PDF anhängen“. Nur PDF, höchstens 3 MB je Datei und je Antwort.</p>
+      <p className="muted small">Vorlagen, die ihr oft mitschickt, z. B. das Formular für Retouren. Im Fall wählst du sie unter der Antwort mit „aus Vorlage wählen“. Nur PDF, höchstens 3 MB je Datei und je Antwort.</p>
       {docs && docs.length > 0 && (
         <ul className="doc-list">
           {docs.map((d) => (

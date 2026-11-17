@@ -241,6 +241,8 @@ a.button:hover { background: var(--text); color: var(--card); }
 .file-chip { display: inline-flex; gap: 6px; align-items: baseline; border: 1px solid var(--line); border-radius: var(--radius); padding: 2px 8px; background: var(--card); max-width: 100%; }
 .file-chip a { overflow-wrap: anywhere; }
 .draft-files select { min-height: 30px; }
+.file-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex-basis: 100%; }
+.file-actions select { width: auto; max-width: 100%; }
 /* Case status as three buttons: open = red, waiting = yellow, done = green. */
 .status-buttons { display: inline-flex; }
 .status-buttons button { --st: var(--bad); border-color: var(--line); border-radius: 0; min-height: 36px; padding: 0 14px; font-weight: 500; }

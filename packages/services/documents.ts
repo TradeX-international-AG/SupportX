@@ -97,7 +97,7 @@ export async function setDraftDocuments(ctx: AppContext, actor: Actor, draftId: 
   return withTx(ctx.db, (tx) => applyDraftDocuments(tx, actor, draftId, input.documentIds, input.expectedVersion));
 }
 
-interface LockedDraft {
+export interface LockedDraft {
   status: string;
   version: number;
   kind: ChannelKind;
@@ -105,7 +105,7 @@ interface LockedDraft {
   document_ids: string[];
 }
 
-async function lockDraft(tx: Tx, actor: Actor, draftId: string, expectedVersion: number): Promise<LockedDraft> {
+export async function lockDraft(tx: Tx, actor: Actor, draftId: string, expectedVersion: number): Promise<LockedDraft> {
   const draft = await one<LockedDraft>(
     tx,
     `SELECT d.status, d.version, d.conversation_id, d.document_ids, cc.kind FROM drafts d
@@ -204,15 +204,9 @@ export async function uploadReplyFile(ctx: AppContext, actor: Actor, conversatio
   if (!UUID.test(conversationId)) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
   const checked = checkCaseFile(input.name, input.data);
   return withTx(ctx.db, async (tx) => {
-    const conv = await one<{ kind: ChannelKind }>(
-      tx,
-      `SELECT cc.kind FROM conversations c JOIN channel_connections cc ON cc.workspace_id = c.workspace_id AND cc.id = c.connection_id
-        WHERE c.workspace_id = $1 AND c.id = $2 FOR UPDATE OF c`,
-      [actor.workspaceId, conversationId],
-    );
-    if (!conv) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
-    if (!REPLY_FILES[conv.kind].supported) throw new ServiceError(409, "NOT_SUPPORTED", REPLY_FILES[conv.kind].note);
-    const open = await one<{ id: string; version: number }>(tx, "SELECT id, version FROM drafts WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited') ORDER BY created_at DESC LIMIT 1", [actor.workspaceId, conversationId]);
+    const kind = await lockCaseForFiles(tx, actor, conversationId);
+    if (!REPLY_FILES[kind].supported) throw new ServiceError(409, "NOT_SUPPORTED", REPLY_FILES[kind].note);
+    const open = await openDraftOf(tx, actor, conversationId);
     if (open) {
       const draft = await lockDraft(tx, actor, open.id, open.version);
       if (draft.document_ids.length >= MAX_REPLY_DOCUMENTS) throw new ServiceError(400, "TOO_MANY", `Höchstens ${MAX_REPLY_DOCUMENTS} Anhänge je Antwort.`);
@@ -220,12 +214,61 @@ export async function uploadReplyFile(ctx: AppContext, actor: Actor, conversatio
       await applyDraftDocuments(tx, actor, open.id, [...draft.document_ids, file.id], open.version, draft);
       return { file, draftId: open.id };
     }
-    const waiting = await many<{ size: number }>(tx, "SELECT size FROM documents WHERE workspace_id = $1 AND conversation_id = $2 AND for_next_reply AND deleted_at IS NULL", [actor.workspaceId, conversationId]);
-    if (waiting.length >= MAX_REPLY_DOCUMENTS) throw new ServiceError(400, "TOO_MANY", `Höchstens ${MAX_REPLY_DOCUMENTS} Anhänge je Antwort.`);
-    if (waiting.reduce((sum, d) => sum + d.size, 0) + input.data.length > MAX_DOCUMENT_BYTES) throw new ServiceError(413, "TOO_LARGE", "Zusammen sind die Anhänge zu groß (höchstens 3 MB je Antwort). Bitte weniger anhängen.");
+    await checkWaitingRoom(tx, actor, conversationId, input.data.length);
     const file = await storeCaseFile(tx, actor, conversationId, { ...checked, data: input.data, source: "upload", forNextReply: true });
     return { file, draftId: null };
   });
+}
+
+/**
+ * "aus Vorlage wählen" in the answer box: a workspace document (e.g. the return form).
+ * With an open draft it goes onto the draft; otherwise a copy waits with the case for the
+ * next reply, like an uploaded file.
+ */
+export async function attachTemplate(ctx: AppContext, actor: Actor, conversationId: string, documentId: string): Promise<{ file: CaseFileInfo | null; draftId: string | null }> {
+  requireRole(actor, ["owner", "agent"]);
+  if (!UUID.test(conversationId)) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
+  if (!UUID.test(documentId)) throw new ServiceError(404, "NOT_FOUND", "Vorlage nicht gefunden.");
+  return withTx(ctx.db, async (tx) => {
+    const kind = await lockCaseForFiles(tx, actor, conversationId);
+    const template = await one<{ id: string; name: string; content_type: string; size: number; data: Buffer }>(
+      tx,
+      "SELECT id, name, content_type, size, data FROM documents WHERE workspace_id = $1 AND id = $2 AND conversation_id IS NULL AND deleted_at IS NULL",
+      [actor.workspaceId, documentId],
+    );
+    if (!template) throw new ServiceError(404, "NOT_FOUND", "Vorlage nicht gefunden.");
+    if (!REPLY_FILES[kind].supported) throw new ServiceError(409, "NOT_SUPPORTED", REPLY_FILES[kind].note);
+    const open = await openDraftOf(tx, actor, conversationId);
+    if (open) {
+      const draft = await lockDraft(tx, actor, open.id, open.version);
+      if (draft.document_ids.includes(template.id)) return { file: null, draftId: open.id };
+      await applyDraftDocuments(tx, actor, open.id, [...draft.document_ids, template.id], open.version, draft);
+      return { file: null, draftId: open.id };
+    }
+    await checkWaitingRoom(tx, actor, conversationId, template.size);
+    const file = await storeCaseFile(tx, actor, conversationId, { name: template.name, contentType: template.content_type, data: template.data, source: "upload", forNextReply: true });
+    return { file, draftId: null };
+  });
+}
+
+export async function lockCaseForFiles(tx: Tx, actor: Actor, conversationId: string): Promise<ChannelKind> {
+  const conv = await one<{ kind: ChannelKind }>(
+    tx,
+    `SELECT cc.kind FROM conversations c JOIN channel_connections cc ON cc.workspace_id = c.workspace_id AND cc.id = c.connection_id
+      WHERE c.workspace_id = $1 AND c.id = $2 FOR UPDATE OF c`,
+    [actor.workspaceId, conversationId],
+  );
+  if (!conv) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
+  return conv.kind;
+}
+
+export const openDraftOf = (tx: Tx, actor: Actor, conversationId: string) =>
+  one<{ id: string; version: number }>(tx, "SELECT id, version FROM drafts WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited') ORDER BY created_at DESC LIMIT 1", [actor.workspaceId, conversationId]);
+
+export async function checkWaitingRoom(tx: Tx, actor: Actor, conversationId: string, addBytes: number, addCount = 1): Promise<void> {
+  const waiting = await many<{ size: number }>(tx, "SELECT size FROM documents WHERE workspace_id = $1 AND conversation_id = $2 AND for_next_reply AND deleted_at IS NULL", [actor.workspaceId, conversationId]);
+  if (waiting.length + addCount > MAX_REPLY_DOCUMENTS) throw new ServiceError(400, "TOO_MANY", `Höchstens ${MAX_REPLY_DOCUMENTS} Anhänge je Antwort.`);
+  if (waiting.reduce((sum, d) => sum + d.size, 0) + addBytes > MAX_DOCUMENT_BYTES) throw new ServiceError(413, "TOO_LARGE", "Zusammen sind die Anhänge zu groß (höchstens 3 MB je Antwort). Bitte weniger anhängen.");
 }
 
 /** Take back a file that waits for the next reply (it was uploaded only for that). */

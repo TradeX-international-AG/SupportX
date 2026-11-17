@@ -3,8 +3,8 @@ import { after, afterEach, describe, it } from "node:test";
 import { getCase } from "../../packages/services/cases.ts";
 import { setSendEnabled, verifyReplyRoute } from "../../packages/services/connections.ts";
 import type { ServiceError } from "../../packages/services/context.ts";
-import { removeWaitingFile, uploadReplyFile } from "../../packages/services/documents.ts";
-import { draftInvoiceReply } from "../../packages/services/invoices.ts";
+import { attachTemplate, removeWaitingFile, uploadDocument, uploadReplyFile } from "../../packages/services/documents.ts";
+import { attachCaseInvoices, draftInvoiceReply } from "../../packages/services/invoices.ts";
 import { approveDraft, composeDraft, discardDraft, dispatchOutbox, queueReply, requestRedraft } from "../../packages/services/replies.ts";
 import { drainJobs } from "../../packages/services/worker.ts";
 import { one } from "../../packages/storage/db.ts";
@@ -83,5 +83,29 @@ describe("Datei anhängen before the reply is written", () => {
     await rejectsWith(uploadReplyFile(h.ctx, s.agent, conv.id, { name: "d.pdf", data: PDF }), "TOO_MANY");
     const result = await draftInvoiceReply(h.ctx, s.agent, conv.id);
     assert.deepEqual(await docIds(h, result.draftId), [result.files[0]!.id, ids[0], ids[1]], "invoice first, then as many as fit");
+  });
+
+  it("aus Vorlage wählen: a template and the weclapp invoice, before and after the draft is written", async () => {
+    const { h, s, conv } = await caseWithoutDraft();
+    const other = await seedWorkspace(h, "Anderer Händler");
+    const template = await uploadDocument(h.ctx, s.owner, { name: "Retoure.pdf", data: PDF });
+    const foreign = await uploadDocument(h.ctx, other.owner, { name: "Fremd.pdf", data: PDF });
+    await rejectsWith(attachTemplate(h.ctx, s.agent, conv.id, foreign.id), "NOT_FOUND");
+    await rejectsWith(attachTemplate(h.ctx, s.viewer, conv.id, template.id), "FORBIDDEN");
+
+    const waiting = await attachTemplate(h.ctx, s.agent, conv.id, template.id);
+    assert.equal(waiting.draftId, null);
+    assert.equal(waiting.file!.name, "Retoure.pdf");
+    const invoice = await attachCaseInvoices(h.ctx, s.agent, conv.id);
+    assert.equal(invoice.draftId, null);
+    assert.equal((await attachCaseInvoices(h.ctx, s.agent, conv.id)).files[0]!.id, invoice.files[0]!.id, "fetched twice, kept once");
+    const composed = await composeDraft(h.ctx, s.agent, conv.id, "Formular und Rechnung anbei.");
+    assert.deepEqual(await docIds(h, composed.draftId), [waiting.file!.id, invoice.files[0]!.id]);
+
+    // With an open draft the template goes straight onto it, without a copy.
+    const second = await uploadDocument(h.ctx, s.owner, { name: "Pflegehinweis.pdf", data: PDF });
+    const onDraft = await attachTemplate(h.ctx, s.agent, conv.id, second.id);
+    assert.equal(onDraft.draftId, composed.draftId);
+    assert.deepEqual(await docIds(h, composed.draftId), [waiting.file!.id, invoice.files[0]!.id, second.id]);
   });
 });

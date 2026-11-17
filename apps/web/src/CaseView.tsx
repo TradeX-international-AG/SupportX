@@ -355,6 +355,10 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
                   base: `${base}/documents`,
                   onUpload: (file) => act(async () => api("POST", `${base}/cases/${caseId}/files`, { name: file.name, dataBase64: await readBase64(file) }), "Datei angehängt. Sie geht mit der Antwort raus, sobald du entschieden hast."),
                   onRemove: (id) => act(() => api("DELETE", `${base}/cases/${caseId}/files/${id}`), "Anhang entfernt."),
+                  templates: documents,
+                  invoiceLabel: invoiceChoice(data.invoices ?? [], c.order_match_status === "unique"),
+                  onTemplate: (id) => act(() => api("POST", `${base}/cases/${caseId}/template-files`, { documentId: id }), "Vorlage angehängt. Sie geht mit der Antwort raus, sobald du entschieden hast."),
+                  onInvoice: () => act(() => api("POST", `${base}/cases/${caseId}/invoice-files`), "Rechnung aus weclapp angehängt. Sie geht mit der Antwort raus, sobald du entschieden hast."),
                 }}
                 onCompose={(instruction) => act(() => api("POST", `${base}/cases/${caseId}/compose`, { instruction }), (data.writer ?? "rules") !== "rules" ? "Ausformuliert. Bitte noch einmal lesen und dann senden." : "Als Antwort übernommen. Bitte noch einmal lesen und dann senden.")}
               />
@@ -379,6 +383,8 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
                 documentBase={`${base}/documents`}
                 onUpload={(file) => act(async () => api("POST", `${base}/drafts/${draft.id}/files`, { name: file.name, dataBase64: await readBase64(file), expectedVersion: draft.version }), "Datei angehängt. Bitte Antwort mit Anhang lesen und senden.")}
                 onDocuments={(ids) => act(() => api("PUT", `${base}/drafts/${draft.id}/documents`, { documentIds: ids, expectedVersion: draft.version }), ids.length ? "Anhang gespeichert. Bitte Antwort mit Anhang lesen und senden." : "Anhang entfernt.")}
+                invoiceLabel={invoiceChoice(data.invoices ?? [], c.order_match_status === "unique")}
+                onInvoice={() => act(() => api("POST", `${base}/cases/${caseId}/invoice-files`), "Rechnung aus weclapp angehängt. Bitte Antwort mit Anhang lesen und senden.")}
               />
             )}
           </section>
@@ -1173,7 +1179,7 @@ const WRITER_NOTE: Record<string, string> = {
 function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUnique, onInvoice, onDecide, onCompose, snippets, onSnippet, files }: {
   current: string | null; hasDraft: boolean; writer: string; pendingOrder: boolean; invoices: string[]; orderUnique: boolean; onInvoice: () => void; onDecide: (decision: string) => void; onCompose: (instruction: string) => void;
   snippets: SnippetInfo[]; onSnippet: (snippetId: string) => void;
-  files: { waiting: CaseFile[]; replyFiles: { supported: boolean; note: string }; base: string; onUpload: (file: File) => void; onRemove: (id: string) => void };
+  files: React.ComponentProps<typeof WaitingFiles>;
 }) {
   const [fetching, setFetching] = useState(false);
   const [custom, setCustom] = useState(false);
@@ -1228,6 +1234,7 @@ function DraftEditor(props: {
   draft: Draft; canEdit: boolean; send: CaseData["send"];
   onSave: (body: string) => void; onSend: (ack: boolean) => void; onDiscard: () => void; canPolish: boolean; onPolish: (body: string) => void;
   documents: DocumentInfo[]; caseFiles: CaseFile[]; replyFiles: { supported: boolean; note: string }; documentBase: string; onDocuments: (ids: string[]) => void; onUpload: (file: File) => void;
+  invoiceLabel: string | null; onInvoice: () => void;
 }) {
   const { draft, canEdit, send } = props;
   const notice = sendNotice(send);
@@ -1270,7 +1277,7 @@ function DraftEditor(props: {
           {snippetNote && <span className="muted">{snippetNote}</span>}
         </div>
       )}
-      <DraftFiles draft={draft} canEdit={canEdit && !dirty} documents={props.documents} caseFiles={props.caseFiles} replyFiles={props.replyFiles} base={props.documentBase} onChange={props.onDocuments} onUpload={props.onUpload} />
+      <DraftFiles draft={draft} canEdit={canEdit && !dirty} documents={props.documents} caseFiles={props.caseFiles} replyFiles={props.replyFiles} base={props.documentBase} invoiceLabel={props.invoiceLabel} onChange={props.onDocuments} onUpload={props.onUpload} onInvoice={props.onInvoice} />
       {(blocking.length > 0 || warnings.length > 0) && (
         <ul className="issues">
           {blocking.map((i, n) => <li key={`b${n}`} className="error">Blockiert: {i.message}</li>)}
@@ -1352,8 +1359,10 @@ const FILE_ACCEPT = "application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png";
  * "Datei anhängen" before a reply is written: the file waits with the case and goes
  * onto the next reply, whichever decision writes it.
  */
-function WaitingFiles({ waiting, replyFiles, base, onUpload, onRemove }: { waiting: CaseFile[]; replyFiles: { supported: boolean; note: string }; base: string; onUpload: (file: File) => void; onRemove: (id: string) => void }) {
-  const [tooBig, setTooBig] = useState(false);
+function WaitingFiles({ waiting, replyFiles, base, templates, invoiceLabel, onUpload, onTemplate, onInvoice, onRemove }: {
+  waiting: CaseFile[]; replyFiles: { supported: boolean; note: string }; base: string; templates: DocumentInfo[]; invoiceLabel: string | null;
+  onUpload: (file: File) => void; onTemplate: (id: string) => void; onInvoice: () => void; onRemove: (id: string) => void;
+}) {
   if (!replyFiles.supported) {
     return (
       <div className="draft-files small">
@@ -1373,27 +1382,66 @@ function WaitingFiles({ waiting, replyFiles, base, onUpload, onRemove }: { waiti
           <button className="link" onClick={() => onRemove(f.id)} aria-label={`${f.name} entfernen`}>entfernen</button>
         </span>
       ))}
-      {waiting.length < 3 && (
-        <label className="file-pick" title="PDF, JPG oder PNG, zusammen höchstens 3 MB je Antwort">
-          <input
-            type="file"
-            accept={FILE_ACCEPT}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              if (used + file.size > MAX_FILE) { setTooBig(true); return; }
-              setTooBig(false);
-              onUpload(file);
-            }}
-          />
-          <span className="button">Datei anhängen</span>
-        </label>
-      )}
-      {tooBig && <span className="error">Zu groß: höchstens 3 MB je Antwort, alle Anhänge zusammen.</span>}
+      {waiting.length < 3 && <FilePick used={used} templates={templates} invoiceLabel={waiting.some((f) => f.source === "erp_invoice") ? null : invoiceLabel} onUpload={onUpload} onTemplate={onTemplate} onInvoice={onInvoice} />}
       <span className="muted">{waiting.length ? "Geht mit der nächsten Antwort raus, egal welche Entscheidung du wählst. " : "PDF, JPG oder PNG, bis 3 Dateien. "}{replyFiles.note}</span>
     </div>
   );
+}
+
+/**
+ * "Datei anhängen" oder "aus Vorlage wählen": upload first, then the stored templates
+ * (Einstellungen › Dokumente) and the order's invoice from weclapp.
+ */
+function FilePick({ used, templates, invoiceLabel, onUpload, onTemplate, onInvoice }: {
+  used: number; templates: Array<{ id: string; name: string; size: number }>; invoiceLabel: string | null;
+  onUpload: (file: File) => void; onTemplate: (id: string) => void; onInvoice: () => void;
+}) {
+  const [tooBig, setTooBig] = useState(false);
+  const empty = templates.length === 0 && !invoiceLabel;
+  return (
+    <div className="file-actions">
+      <label className="file-pick" title="PDF, JPG oder PNG, zusammen höchstens 3 MB je Antwort">
+        <input
+          type="file"
+          accept={FILE_ACCEPT}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            if (used + file.size > MAX_FILE) { setTooBig(true); return; }
+            setTooBig(false);
+            onUpload(file);
+          }}
+        />
+        <span className="button">Datei anhängen</span>
+      </label>
+      <span className="muted">oder</span>
+      <select
+        value=""
+        disabled={empty}
+        title={empty ? "Noch keine Vorlagen. Hinterlegen unter Einstellungen › Dokumente." : undefined}
+        aria-label="Anhang aus Vorlage wählen"
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) return;
+          if (v === INVOICE_OPTION) onInvoice(); else onTemplate(v);
+        }}
+      >
+        <option value="">{empty ? "aus Vorlage wählen (keine hinterlegt)" : "aus Vorlage wählen …"}</option>
+        {invoiceLabel && <option value={INVOICE_OPTION}>{invoiceLabel}</option>}
+        {templates.map((d) => <option key={d.id} value={d.id}>{d.name} ({fmtSize(d.size)})</option>)}
+      </select>
+      {tooBig && <span className="error">Zu groß: höchstens 3 MB je Antwort, alle Anhänge zusammen.</span>}
+    </div>
+  );
+}
+
+const INVOICE_OPTION = "__invoice";
+
+/** Label of the invoice choice, or null when there is no uniquely linked order. */
+function invoiceChoice(invoices: string[], orderUnique: boolean): string | null {
+  if (!orderUnique) return null;
+  return invoices.length ? `Rechnung ${invoices.join(", ")} aus weclapp` : "Rechnung aus weclapp";
 }
 
 /**
@@ -1401,15 +1449,16 @@ function WaitingFiles({ waiting, replyFiles, base, onUpload, onRemove }: { waiti
  * files of this case (invoice from weclapp) or a file uploaded just for this reply.
  * Shown in every channel; where the channel takes no files it says so and why.
  */
-function DraftFiles({ draft, canEdit, documents, caseFiles, replyFiles, base, onChange, onUpload }: {
-  draft: Draft; canEdit: boolean; documents: DocumentInfo[]; caseFiles: CaseFile[]; replyFiles: { supported: boolean; note: string }; base: string; onChange: (ids: string[]) => void; onUpload: (file: File) => void;
+function DraftFiles({ draft, canEdit, documents, caseFiles, replyFiles, base, invoiceLabel, onChange, onUpload, onInvoice }: {
+  draft: Draft; canEdit: boolean; documents: DocumentInfo[]; caseFiles: CaseFile[]; replyFiles: { supported: boolean; note: string }; base: string; invoiceLabel: string | null;
+  onChange: (ids: string[]) => void; onUpload: (file: File) => void; onInvoice: () => void;
 }) {
-  const [tooBig, setTooBig] = useState(false);
   const chosen = draft.document_ids ?? [];
   const all: Array<{ id: string; name: string; size: number }> = [...caseFiles, ...documents];
   const available = all.filter((d) => !chosen.includes(d.id));
   const nameOf = (id: string) => all.find((d) => d.id === id)?.name ?? "Dokument (aus der Liste entfernt)";
-  const full = chosen.length >= 3;
+  const used = chosen.reduce((sum, id) => sum + (all.find((d) => d.id === id)?.size ?? 0), 0);
+  const invoiceAttached = caseFiles.some((f) => f.source === "erp_invoice" && chosen.includes(f.id));
   if (!replyFiles.supported) {
     return (
       <div className="draft-files small">
@@ -1429,30 +1478,16 @@ function DraftFiles({ draft, canEdit, documents, caseFiles, replyFiles, base, on
           {canEdit && <button className="link" onClick={() => onChange(chosen.filter((x) => x !== id))} aria-label={`${nameOf(id)} entfernen`}>entfernen</button>}
         </span>
       ))}
-      {canEdit && available.length > 0 && !full && (
-        <select value="" onChange={(e) => e.target.value && onChange([...chosen, e.target.value])} aria-label="PDF anhängen">
-          <option value="">PDF anhängen …</option>
-          {available.map((d) => <option key={d.id} value={d.id}>{d.name} ({fmtSize(d.size)})</option>)}
-        </select>
+      {canEdit && chosen.length < 3 && (
+        <FilePick
+          used={used}
+          templates={available}
+          invoiceLabel={invoiceAttached ? null : invoiceLabel}
+          onUpload={onUpload}
+          onTemplate={(id) => onChange([...chosen, id])}
+          onInvoice={onInvoice}
+        />
       )}
-      {canEdit && !full && (
-        <label className="file-pick" title="PDF, JPG oder PNG, höchstens 3 MB; gilt nur für diese Antwort">
-          <input
-            type="file"
-            accept={FILE_ACCEPT}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              if (file.size > MAX_FILE) { setTooBig(true); return; }
-              setTooBig(false);
-              onUpload(file);
-            }}
-          />
-          <span className="button">Datei anhängen</span>
-        </label>
-      )}
-      {tooBig && <span className="error">Die Datei ist zu groß (höchstens 3 MB).</span>}
       {chosen.length === 0 && <span className="muted">kein Anhang</span>}
       {chosen.length > 0 && <span className="muted">{replyFiles.note}</span>}
     </div>
