@@ -14,6 +14,7 @@ import { listCaseFiles, REPLY_FILES } from "./documents.ts";
 import { invoiceSummary } from "./invoices.ts";
 import { marketplaceResolve } from "../core/marketplace-resolve.ts";
 import { OWN_COPY_REASON, SYSTEM_NOTICE_REASON, ownCopyText, ruleReason } from "../core/category.ts";
+import { ORDER_NOTICE_SQL } from "../core/order-notice.ts";
 import { checkSubjectPattern, matchesSubjectPattern } from "../core/subject-pattern.ts";
 import type { Queryable } from "../storage/db.ts";
 import type { ChannelKind } from "./connections.ts";
@@ -26,7 +27,7 @@ import { refundNoticeAmount, returnCheck, type RefundNoticeAmount, type ReturnCh
 import { caseRefundStatus } from "./refunds.ts";
 import { parseAmountInput } from "../core/refund-list.ts";
 
-export type CaseFilter = "open" | "needs_attention" | "waiting" | "closed" | "info" | "all";
+export type CaseFilter = "open" | "needs_attention" | "waiting" | "closed" | "orders" | "info" | "all";
 
 const UUID = /^[0-9a-f-]{36}$/i;
 function assertId(id: string): void {
@@ -72,7 +73,8 @@ export async function listCases(ctx: AppContext, actor: Actor, filter: CaseFilte
     needs_attention: NEEDS_ATTENTION,
     waiting: "c.status = 'waiting' AND c.category = 'support'",
     closed: "c.status = 'closed' AND c.category = 'support'",
-    info: "c.category = 'info'",
+    orders: ORDER_NOTICE_SQL,
+    info: `c.category = 'info' AND NOT ${ORDER_NOTICE_SQL}`,
     all: "true",
   }[filter];
   // Open cases: the deadline that runs out first on top. "Wartet": the next follow-up first.
@@ -271,11 +273,12 @@ async function customerHistoryFor(ctx: AppContext, ws: string, conversationId: s
 
 /** Counts for the inbox tabs. */
 export async function caseCounts(ctx: AppContext, actor: Actor) {
-  const counts = await one<{ open: number; needs_attention: number; info: number }>(
+  const counts = await one<{ open: number; needs_attention: number; orders: number; info: number }>(
     ctx.db,
     `SELECT count(*) FILTER (WHERE c.category = 'support' AND c.status = 'open')::int AS open,
             count(*) FILTER (WHERE ${NEEDS_ATTENTION})::int AS needs_attention,
-            count(*) FILTER (WHERE c.category = 'info')::int AS info
+            count(*) FILTER (WHERE ${ORDER_NOTICE_SQL})::int AS orders,
+            count(*) FILTER (WHERE c.category = 'info' AND NOT ${ORDER_NOTICE_SQL})::int AS info
      FROM conversations c WHERE c.workspace_id = $1`,
     [actor.workspaceId],
   );

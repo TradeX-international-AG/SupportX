@@ -199,7 +199,7 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
 
   // --- Cases -----------------------------------------------------------------
   app.get("/api/w/:ws/cases", async (req) => {
-    const filter = parse(z.enum(["open", "needs_attention", "waiting", "closed", "info", "all"]).default("open"), (req.query as { filter?: string }).filter) as CaseFilter;
+    const filter = parse(z.enum(["open", "needs_attention", "waiting", "closed", "orders", "info", "all"]).default("open"), (req.query as { filter?: string }).filter) as CaseFilter;
     const q = parse(z.string().max(100).optional(), (req.query as { q?: string }).q);
     const topic = parse(z.string().max(40).optional(), (req.query as { topic?: string }).topic);
     const a = await actor(req);

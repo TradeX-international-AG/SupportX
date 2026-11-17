@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { OWN_COPY_REASON, SYSTEM_NOTICE_REASON, categorizeMail, systemNoticeOf } from "../../packages/core/category.ts";
+import { isOrderNotice } from "../../packages/core/order-notice.ts";
 
 const mail = (over: Partial<Parameters<typeof categorizeMail>[0]> = {}) => ({
   from: { address: "kunde@example.invalid" }, subject: "Frage", bodyText: "Hallo", headers: {}, hasOrderReference: false, ...over,
@@ -77,5 +78,31 @@ describe("marketplace system notices", () => {
   it("lets an operator rule overrule the built-in notice detection", () => {
     const rules = [{ matchType: "from_address" as const, pattern: "donotreply@amazon.com", category: "support" as const }];
     assert.equal(categorizeMail(mail({ from: { address: "donotreply@amazon.com" }, subject: "Hinweis" }), rules).category, "support");
+  });
+});
+
+describe("order notifications next to advertising", () => {
+  const info = (subject: string, category_reason: string | null = null) => ({ category: "info", subject, category_reason });
+  it("recognises order mails from marketplaces and shops", () => {
+    for (const s of [
+      "Neuer Auftrag auf dem DocMorris Marktplatz: 1PH5BD",
+      "Neue Bestellung eingegangen: 123-456",
+      "Bestellung erhalten – 4711",
+      "New order: #1001",
+      "[Auwald] Bestellung #1001 aufgegeben von Erika",
+      "Sie haben verkauft: Artikel wurde verkauft",
+      "You've sold your item",
+    ]) assert.ok(isOrderNotice(info(s)), s);
+  });
+  it("puts marketplace system notices (refund issued) with the orders", () => {
+    assert.ok(isOrderNotice(info("12.9 EUR Rückerstattung veranlasst – Bestellung 028-1", SYSTEM_NOTICE_REASON)));
+  });
+  it("keeps newsletters and webinars under Werbung & Infos", () => {
+    for (const s of ["Your Weekly Webinar Digest: Upcoming Sessions & On-Demand Replays", "Tomorrow: your live AGL walkthrough. Quote, book, and track in Seller Central", "Singles Day 2026 – Jetzt anmelden"]) {
+      assert.ok(!isOrderNotice(info(s)), s);
+    }
+  });
+  it("never moves a customer request", () => {
+    assert.ok(!isOrderNotice({ category: "support", subject: "Neue Bestellung kommt nicht an", category_reason: null }));
   });
 });

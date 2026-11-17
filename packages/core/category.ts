@@ -1,5 +1,6 @@
 import type { MessageAddress } from "./contracts.ts";
 import { matchesSubjectPattern } from "./subject-pattern.ts";
+import { SYSTEM_NOTICE_REASON } from "./order-notice.ts";
 
 /**
  * Is a new mail a customer request, or information/advertising (newsletters,
@@ -75,7 +76,7 @@ export function ownCopyText(body: string): string {
  * come from the bare amazon.<tld> domain, so the two never mix. Other senders are set
  * up by the operator with a sender rule ("immer Werbung/Info").
  */
-export const SYSTEM_NOTICE_REASON = "Systemmeldung des Marktplatzes";
+export { SYSTEM_NOTICE_REASON };
 const SYSTEM_SENDERS: ReadonlyArray<{ platform: string; domain: RegExp }> = [
   { platform: "Amazon", domain: /^amazon\.(de|at|fr|it|es|nl|pl|se|ie|com\.be|com\.tr|co\.uk|com)$/ },
 ];
@@ -124,3 +125,4 @@ export function categorizeMail(input: CategoryInput, rules: ReadonlyArray<Catego
   if (score >= 2) return { category: "info", source: "auto", reason: reasons.join(", ") };
   return { category: "support", source: "auto", reason: "keine Werbemerkmale" };
 }
+

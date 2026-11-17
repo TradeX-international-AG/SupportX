@@ -28,9 +28,13 @@ describe("marketplace system notices", () => {
     assert.equal(await one(h.ctx.db, "SELECT 1 FROM drafts WHERE conversation_id = $1", [conv.id]), null);
     const open = await listCases(h.ctx, s.agent, "open");
     assert.ok(!open.some((r) => (r as { id: string }).id === conv.id));
-    const counts = await caseCounts(h.ctx, s.agent) as { open: number; info: number };
+    const counts = await caseCounts(h.ctx, s.agent) as { open: number; orders: number; info: number };
     assert.equal(counts.open, 0);
-    assert.equal(counts.info, 1);
+    // An order notice, not advertising: its own tab next to "Werbung & Infos".
+    assert.equal(counts.orders, 1);
+    assert.equal(counts.info, 0);
+    assert.ok((await listCases(h.ctx, s.agent, "orders")).some((r) => (r as { id: string }).id === conv.id));
+    assert.ok(!(await listCases(h.ctx, s.agent, "info")).some((r) => (r as { id: string }).id === conv.id));
   });
 
   it("show up in the history of the customer's case for the same order", async () => {

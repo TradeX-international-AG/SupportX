@@ -44,3 +44,13 @@ wie viele davon umsortiert werden, und Beispiele. Beim Speichern werden diese F�
 umsortiert (nicht die von Hand eingeordneten und nicht die schon beantworteten), und jede
 neue Mail mit dem Muster wird beim Eingang so eingeordnet. Unter Einstellungen →
 „Werbung erkennen“ stehen alle Regeln mit Trefferzahl und lassen sich entfernen.
+
+## Auftragsbenachrichtigungen (ab 0.17.6)
+
+Was als Werbung/Info eingeordnet ist, zeigt der Posteingang in zwei Reitern:
+„Auftragsbenachrichtigungen“ (Meldungen zu Aufträgen, etwa „Neuer Auftrag auf dem
+DocMorris Marktplatz: …“, „Neue Bestellung“, „Bestellung #… aufgegeben“ und die
+Systemmeldungen der Marktplätze wie „Rückerstattung veranlasst“) und „Werbung & Infos“
+(alles andere). Beide bekommen keinen Antwortentwurf und keine Frist; die Erstattungsliste
+liest die Systemmeldungen weiter wie bisher. Erkannt wird am Betreff
+(`packages/core/order-notice.ts`), es ändert sich nichts an der gespeicherten Einordnung.

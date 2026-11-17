@@ -4,6 +4,7 @@ import { BatchApprove } from "./BatchApprove.tsx";
 import { CaseView } from "./CaseView.tsx";
 import { FetchStatus } from "./FetchStatus.tsx";
 import { deadlineState } from "../../../packages/core/deadline.ts";
+import { isOrderNotice } from "../../../packages/core/order-notice.ts";
 
 type Role = "owner" | "agent" | "viewer";
 
@@ -39,14 +40,15 @@ const FILTERS = [
   { id: "needs_attention", label: "Klärung nötig", count: "needs_attention" },
   { id: "waiting", label: "Wartet", count: null },
   { id: "closed", label: "Erledigt", count: null },
+  { id: "orders", label: "Auftragsbenachrichtigungen", count: "orders" },
   { id: "info", label: "Werbung & Infos", count: "info" },
   { id: "all", label: "Alle", count: null },
 ] as const;
-type Counts = { open: number; needs_attention: number; info: number; urgent: number };
+type Counts = { open: number; needs_attention: number; orders: number; info: number; urgent: number };
 
 /** One short line saying where the case stands, instead of a row of badges. */
 function caseState(c: CaseRow): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
-  if (c.category === "info") return { text: c.category_reason ? `Erkannt: ${c.category_reason}` : "Werbung oder Info", tone: "muted" };
+  if (c.category === "info") return { text: c.category_reason ? `Erkannt: ${c.category_reason}` : isOrderNotice(c) ? "Auftragsbenachrichtigung" : "Werbung oder Info", tone: "muted" };
   if (c.last_error) return { text: "Fehler, bitte ansehen", tone: "bad" };
   if (c.outbox_state === "delivery_uncertain" || c.outbox_state === "failed") return { text: OUTBOX_LABEL[c.outbox_state] ?? c.outbox_state, tone: "bad" };
   if (c.outbox_state && c.outbox_state !== "suppressed") return { text: `Antwort ${OUTBOX_LABEL[c.outbox_state] ?? c.outbox_state}`, tone: "ok" };
@@ -170,6 +172,7 @@ export function Inbox({ workspaceId, role, openCase }: { workspaceId: string; ro
         </div>
         <FetchStatus workspaceId={workspaceId} canFetch={role !== "viewer"} onFetched={load} />
         {query && <p className="muted small pad">{cases.length === 200 ? "Mehr als 200" : cases.length} {cases.length === 1 ? "Treffer" : "Treffer"} für „{query}“ in allen Fällen. <button className="link" onClick={() => setSearch("")}>Suche löschen</button></p>}
+        {!query && filter === "orders" && <p className="muted small pad">Meldungen von Marktplätzen und Shops zu Aufträgen, zum Beispiel neue Bestellungen, Rückerstattungen und Rücksendungen. Sie bekommen keinen Antwortentwurf. Ist eine Kundenanfrage dabei, im Fall auf „Ist eine Kundenanfrage“ klicken.</p>}
         {!query && filter === "info" && <p className="muted small pad">Newsletter, Aktionen und Partner-Infos. Sie bekommen keinen Antwortentwurf. Ist eine Kundenanfrage dabei, im Fall auf „Ist eine Kundenanfrage“ klicken.</p>}
         {error && <p className="error pad">{error}</p>}
         {cases.length === 0 && <p className="muted pad">{query ? "Nichts gefunden." : "Hier ist gerade nichts."}</p>}

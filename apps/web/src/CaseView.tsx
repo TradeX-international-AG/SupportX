@@ -19,6 +19,7 @@ import type { RefundDue } from "../../../packages/core/refund-due.ts";
 import { formatMoney, type ReturnCheck } from "../../../packages/core/return-check.ts";
 import { formatAmount, type RefundListItem } from "../../../packages/core/refund-list.ts";
 import type { MarketplaceResolve } from "../../../packages/core/marketplace-resolve.ts";
+import { isOrderNotice } from "../../../packages/core/order-notice.ts";
 
 type Role = "owner" | "agent" | "viewer";
 type Rec = Record<string, unknown>;
@@ -1537,7 +1538,7 @@ function CategoryBar({ category, reason, sender, subject, base, canEdit, onSet }
   if (category === "info") {
     return (
       <div className="notice info-bar">
-        <div><strong>Werbung oder Info</strong>, kein Antwortentwurf.{reason ? <span className="muted"> Erkannt an: {reason}.</span> : null}</div>
+        <div><strong>{isOrderNotice({ category, subject, category_reason: reason }) ? "Auftragsbenachrichtigung" : "Werbung oder Info"}</strong>, kein Antwortentwurf.{reason ? <span className="muted"> Erkannt an: {reason}.</span> : null}</div>
         {canEdit && (asking ? <><div className="small">Als Kundenanfrage behandeln:</div>{choices}</> : <button onClick={() => setAsking("choose")}>Ist eine Kundenanfrage</button>)}
       </div>
     );
