@@ -59,6 +59,10 @@ export async function runJob(ctx: AppContext, job: JobRow): Promise<void> {
       await autoInvoice(ctx, ws, p.conversationId!);
       await autoParcelStatus(ctx, ws, p.conversationId!);
       return;
+    case "order.match":
+      // Only the weclapp lookup, e.g. for a marketplace refund notice: no AI, no automatic reply.
+      await enrichConversation(ctx, ws, p.conversationId!);
+      return;
     case "case.draft":
       await generateDraft(ctx, ws, p.conversationId!, p.decision as ReplyDecision | undefined);
       return;

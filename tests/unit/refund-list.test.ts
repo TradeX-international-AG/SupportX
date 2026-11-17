@@ -102,4 +102,34 @@ describe("Erstattungsliste", () => {
     const b = base({ conversationId: "00000000-0000-0000-0000-0000000000d2", outcome: "refund", orderReferences: [{ value: "TRACK1", kind: "tracking" }] });
     assert.equal(groupRefunds([a, b]).length, 2);
   });
+
+  it("joins a portal refund notice with the customer case by the order number as stored at intake", () => {
+    const notice = base({ conversationId: "00000000-0000-0000-0000-0000000000e1", platform: "email", customerName: "Amazon", subject: "7.6 EUR Rückerstattung veranlasst – Bestellung 303-9564497-0268306",
+      orderReferences: [{ value: "303-9564497-0268306", kind: "amazon_order_id" }], lastMessageAt: "2026-11-12T08:00:00Z" });
+    const customer = base({ conversationId: "00000000-0000-0000-0000-0000000000e2", outcome: "partial_refund", customerName: "Kunde B",
+      orderReferences: [{ value: "303-9564497-0268306", kind: "amazon_order_id" }, { value: "RE-1001", kind: "invoice_number" }], externalOrderId: "so-9",
+      order: { orderNumber: "303-9564497-0268306", lines: [{ title: "Müsli", quantity: 1 }] } });
+    const list = groupRefunds([notice, customer]);
+    assert.equal(list.length, 1, "one refund, not two");
+    assert.equal(list[0]!.viaPortal, true);
+    assert.equal(list[0]!.orderNumber, "303-9564497-0268306");
+    assert.equal(list[0]!.customer, "Kunde B");
+    assert.equal(list[0]!.platform, "amazon");
+  });
+
+  it("shows the order number of a portal notice without a weclapp order, also when only the subject has it", () => {
+    const stored = base({ conversationId: "00000000-0000-0000-0000-0000000000f1", platform: "email", subject: "9.55 EUR Rückerstattung veranlasst – Bestellung 028-4420569-4607554",
+      orderReferences: [{ value: "028-4420569-4607554", kind: "amazon_order_id" }] });
+    const subjectOnly = base({ conversationId: "00000000-0000-0000-0000-0000000000f2", platform: "email", subject: "5.00 EUR Rückerstattung veranlasst – Bestellung 302-1111111-2222222" });
+    const list = groupRefunds([stored, subjectOnly]);
+    assert.deepEqual(list.map((i) => i.marketplaceOrderNumber).sort(), ["028-4420569-4607554", "302-1111111-2222222"]);
+    assert.ok(list.every((i) => i.platform === "amazon" && i.viaPortal && i.orderNumber === null));
+  });
+
+  it("lists credit note drafts made in weclapp for a case of the group", () => {
+    const a = base({ conversationId: "00000000-0000-0000-0000-0000000000a7", outcome: "refund", orderReferences: [{ value: "302-1234567-7654321", kind: "amazon_order_id" }],
+      creditNoteDrafts: [{ number: "GS-7", state: "created", cents: 760, at: "2026-11-15T00:00:00Z" }] });
+    assert.deepEqual(groupRefunds([a])[0]!.creditNoteDrafts, [{ number: "GS-7", state: "created", cents: 760, at: "2026-11-15T00:00:00Z" }]);
+    assert.equal(groupRefunds([a])[0]!.viaPortal, false);
+  });
 });

@@ -6,7 +6,8 @@ import { formatAmount, type RefundListItem } from "../../../packages/core/refund
 type Role = "owner" | "agent" | "viewer";
 type Filter = "open" | "done" | "all";
 
-const SOURCE_LABEL: Record<string, string> = { outcome: "Ergebnis im Fall", notice: "Meldung des Marktplatzes", manual: "von Hand hinzugefügt" };
+const SOURCE_LABEL: Record<string, string> = { outcome: "Ergebnis im Fall", notice: "im Portal des Marktplatzes erstattet", manual: "von Hand hinzugefügt" };
+const DRAFT_STATE: Record<string, string> = { pending: "wird angelegt", created: "Entwurf", needs_review: "Entwurf, Beträge prüfen", uncertain: "unklar, in weclapp prüfen" };
 const KIND_LABEL: Record<RefundListItem["kind"], string> = { full: "Erstattet", partial: "Teilweise erstattet", unknown: "Erstattung gemeldet" };
 
 const fmtDay = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "–");
@@ -16,8 +17,8 @@ const amountText = (a: RefundListItem["amount"]) => (a ? formatAmount(a.cents, a
 
 /**
  * "Erstattungen": every refund decided in a case or reported by a marketplace,
- * once per order. A person makes the credit note in weclapp and ticks it off here.
- * SupportX does not refund and does not write to weclapp.
+ * once per order. A person makes the credit note in weclapp (or as a draft from
+ * the case) and ticks it off here. The tick itself writes nothing to weclapp.
  */
 export function Refunds({ workspaceId, role, onOpenCase, onCounts }: { workspaceId: string; role: Role; onOpenCase: (id: string) => void; onCounts?: (open: number) => void }) {
   const [filter, setFilter] = useState<Filter>("all");
@@ -73,8 +74,8 @@ export function Refunds({ workspaceId, role, onOpenCase, onCounts }: { workspace
         </div>
       </div>
       <p className="muted small wide refunds-intro">
-        Fälle mit Ergebnis „Erstattet“ oder „Teilweise erstattet“ und Erstattungsmeldungen der Marktplätze, je Bestellung einmal.
-        Gutschrift in weclapp anlegen, dann hier abhaken. SupportX erstattet nicht selbst und schreibt nichts in weclapp.
+        Fälle mit Ergebnis „Erstattet“ oder „Teilweise erstattet“ und Erstattungen aus dem Portal der Marktplätze, je Bestellung einmal.
+        Gutschrift in weclapp anlegen, dann hier abhaken. Das Abhaken selbst schreibt noch nichts in weclapp.
       </p>
       {error && <p className="error">{error}</p>}
       {!items ? <p className="muted wide">Lädt …</p> : items.length === 0 ? (
@@ -101,7 +102,8 @@ function RefundRow({ item, weclappHref, canEdit, busy, onOpenCase, onDone, onDet
   onRemove: () => void;
 }) {
   const [amount, setAmount] = useState(fieldAmount(item));
-  const [creditNote, setCreditNote] = useState(item.done?.creditNoteNumber ?? "");
+  const draftNumber = item.creditNoteDrafts.find((d) => d.number)?.number ?? "";
+  const [creditNote, setCreditNote] = useState(item.done?.creditNoteNumber ?? draftNumber);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const done = !!item.done;
   const savedAmount = fieldAmount(item);
@@ -118,8 +120,10 @@ function RefundRow({ item, weclappHref, canEdit, busy, onOpenCase, onDone, onDet
       <div className="refund-order">
         <div className="refund-number">{item.orderNumber ?? item.marketplaceOrderNumber ?? "ohne Bestellnummer"}</div>
         <div className="small muted">
-          <span className="tag">{PLATFORM_LABEL[item.platform] ?? item.platform}</span>
-          {item.orderNumber && item.marketplaceOrderNumber ? ` · ${item.marketplaceOrderNumber}` : ""}
+          {/* A refund notice arrives by mail but was issued in the marketplace portal. */}
+          {!(item.viaPortal && item.platform === "email") && <span className="tag">{PLATFORM_LABEL[item.platform] ?? item.platform}</span>}
+          {item.viaPortal && <>{item.platform === "email" ? "" : " · "}<span className="tag">Portal</span></>}
+          {item.orderNumber && item.marketplaceOrderNumber && item.marketplaceOrderNumber !== item.orderNumber ? ` · ${item.marketplaceOrderNumber}` : ""}
         </div>
         {item.customer && <div className="small ellipsis">{item.customer}</div>}
         {weclappHref && <a className="button small weclapp-link" href={weclappHref} target="_blank" rel="noopener noreferrer">Auftrag in weclapp ↗</a>}
@@ -145,6 +149,11 @@ function RefundRow({ item, weclappHref, canEdit, busy, onOpenCase, onDone, onDet
           </label>
         ) : <div className="refund-sum">{amountText(item.amount) || "–"}</div>}
         {item.amount?.from === "notice" && <div className="small muted">laut Meldung des Marktplatzes</div>}
+        {item.creditNoteDrafts.map((d, n) => (
+          <div key={n} className="small" title="Aus SupportX in weclapp angelegt. Buchen erst in weclapp.">
+            In weclapp: Gutschrift {d.number ?? ""} {DRAFT_STATE[d.state] ?? d.state} · {formatAmount(d.cents, item.amount?.currency ?? "EUR").replace(/ /g, " ")}
+          </div>
+        ))}
         {item.creditNotes.length > 0 && !done && <div className="small warn-text" title="In der zuletzt abgerufenen Bestellung steht schon eine Gutschrift. Vielleicht ist das schon erledigt.">In weclapp: Gutschrift {item.creditNotes.join(", ")}</div>}
       </div>
       <div className="refund-state small">
@@ -165,7 +174,7 @@ function RefundRow({ item, weclappHref, canEdit, busy, onOpenCase, onDone, onDet
       <div className="refund-cases small">
         {item.cases.map((c) => (
           <button key={c.id} className="link" title={`${SOURCE_LABEL[c.source]} · ${fmtDate(c.at)}`} onClick={() => onOpenCase(c.id)}>
-            {c.source === "notice" ? "Meldung" : "Fall"}: {c.subject || "(ohne Betreff)"}
+            {c.source === "notice" ? "Portal" : "Fall"}: {c.subject || "(ohne Betreff)"}
           </button>
         ))}
         {canEdit && !done && (confirmRemove ? (

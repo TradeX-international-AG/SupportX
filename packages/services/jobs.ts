@@ -1,6 +1,6 @@
 import type { Db, Queryable } from "../storage/db.ts";
 
-export type JobType = "mail.sync" | "case.enrich" | "case.draft" | "outbox.dispatch" | "outbox.reconcile" | "mail.subscription";
+export type JobType = "mail.sync" | "case.enrich" | "order.match" | "case.draft" | "outbox.dispatch" | "outbox.reconcile" | "mail.subscription";
 
 export interface JobRow {
   id: string;

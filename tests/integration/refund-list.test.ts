@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, it } from "node:test";
 import { getCase, setOutcome } from "../../packages/services/cases.ts";
+import { matchRefundNotices } from "../../packages/services/ingestion.ts";
+import { drainJobs } from "../../packages/services/worker.ts";
 import { addToRefundList, listRefunds, removeFromRefundList, setRefundDetails, setRefundDone } from "../../packages/services/refunds.ts";
 import { caseByThread, closeDb, createHarness, loadDemoMails, seedWorkspace, syncAndDrain, type Harness } from "./harness.ts";
 
@@ -98,5 +100,31 @@ describe("Erstattungsliste", () => {
     // An amount without a refund outcome is ignored.
     await setOutcome(h.ctx, s.agent, conv.id, { outcome: "replacement", amount: "99" });
     assert.equal((await listRefunds(h.ctx, s.agent, "all")).items.length, 0);
+  });
+
+  it("looks up a refund from the marketplace portal in weclapp, also for notices that arrived earlier", async () => {
+    h = await createHarness();
+    const s = await seedWorkspace(h);
+    const ORDER = "302-1234567-7654321";
+    h.graph.addInbound({ from: "seller-notification@amazon.de", subject: `7.60 EUR Rückerstattung veranlasst – Bestellung ${ORDER}`, body: `Bestell-ID: ${ORDER}`, conversationId: "portal-1" });
+    await syncAndDrain(h, s);
+    const notice = await caseByThread(h, s, "portal-1");
+    let list = await listRefunds(h.ctx, s.agent, "open");
+    assert.equal(list.items.length, 1);
+    assert.equal(list.items[0]!.orderNumber, "AU-10001", "the weclapp order of the portal refund");
+    assert.equal(list.items[0]!.marketplaceOrderNumber, ORDER);
+    assert.equal(list.items[0]!.viaPortal, true);
+    assert.equal(list.items[0]!.platform, "amazon");
+    assert.equal(await h.ctx.db.query("SELECT 1 FROM drafts WHERE conversation_id = $1", [notice.id]).then((r) => r.rowCount), 0, "still no reply for a notice");
+
+    // A notice that arrived before this lookup existed: queued once at worker start.
+    await h.ctx.db.query("DELETE FROM order_links WHERE conversation_id = $1", [notice.id]);
+    assert.equal((await listRefunds(h.ctx, s.agent, "open")).items[0]!.orderNumber, null);
+    assert.equal(await matchRefundNotices(h.ctx.db), 1);
+    await drainJobs(h.ctx);
+    assert.equal(await matchRefundNotices(h.ctx.db), 0, "looked up once");
+    list = await listRefunds(h.ctx, s.agent, "open");
+    assert.equal(list.items[0]!.orderNumber, "AU-10001");
+    assert.ok(list.items[0]!.externalOrderId);
   });
 });

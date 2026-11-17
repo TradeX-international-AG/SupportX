@@ -2,6 +2,7 @@ import type { IngressMessage, SyncResult } from "../core/contracts.ts";
 import { newestEmailText, routeMessage, type RoutingRule } from "../core/classify.ts";
 import { categorizeMail, type CategoryRule } from "../core/category.ts";
 import { extractOrderReferences, type OrderReference } from "../core/references.ts";
+import { isRefundNotice } from "../core/refund-due.ts";
 import { sameText } from "../connectors/marketplace-common.ts";
 import { OUTBOX_HEADER } from "../connectors/microsoft/graph-mail.ts";
 import { many, one, withTx, type Db, type Queryable, type Tx } from "../storage/db.ts";
@@ -238,6 +239,10 @@ export async function ingestMessage(tx: Tx, connection: ChannelConnectionRow, ru
   await tx.query("UPDATE drafts SET status = 'superseded', updated_at = now() WHERE workspace_id = $1 AND conversation_id = $2 AND status IN ('proposed','edited')", [ws, conversation.id]);
   if (kind === "customer" && category === "support") {
     await enqueue(tx, { workspaceId: ws, type: "case.enrich", payload: { conversationId: conversation.id }, dedupeKey: `case.enrich:${conversation.id}` });
+  } else if (isRefundNotice(message.subject) && refs.length > 0) {
+    // A refund issued in the marketplace portal is filed as a notice, not a request:
+    // still look up its order in weclapp so the refund list shows and links it.
+    await enqueue(tx, { workspaceId: ws, type: "order.match", payload: { conversationId: conversation.id }, dedupeKey: `order.match:${conversation.id}` });
   }
   await audit(tx, actor, "message.received", "conversation", conversation.id, { messageId: inserted.id, kind });
   return "stored";
@@ -379,4 +384,22 @@ export async function mergeSplitFollowUps(db: Db): Promise<number> {
     });
   }
   return merged;
+}
+
+/**
+ * Marketplace refund notices that arrived before notices were looked up in
+ * weclapp: queue the order lookup once (only those never looked up).
+ */
+export async function matchRefundNotices(db: Queryable): Promise<number> {
+  const rows = await many<{ id: string; workspace_id: string; subject: string | null }>(
+    db,
+    `SELECT c.id, c.workspace_id, c.subject FROM conversations c
+      WHERE c.category <> 'support' AND c.subject ~* '(erstattung|refund|rembourse)'
+        AND jsonb_array_length(coalesce(c.order_references, '[]'::jsonb)) > 0
+        AND NOT EXISTS (SELECT 1 FROM order_links ol WHERE ol.workspace_id = c.workspace_id AND ol.conversation_id = c.id)
+      ORDER BY c.last_message_at DESC NULLS LAST LIMIT 500`,
+  );
+  const due = rows.filter((r) => isRefundNotice(r.subject));
+  for (const r of due) await enqueue(db, { workspaceId: r.workspace_id, type: "order.match", payload: { conversationId: r.id }, dedupeKey: `order.match:${r.id}` });
+  return due.length;
 }

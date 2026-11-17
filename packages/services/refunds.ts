@@ -8,8 +8,8 @@ import { actorId, requireRole, ServiceError, type Actor, type AppContext } from 
  * Refund list ("Erstattungen"): cases with the outcome "Erstattet" or
  * "Teilweise erstattet", marketplace refund notices and cases a person added,
  * grouped per order (core/refund-list.ts). A person ticks off a refund once the
- * credit note is done in the ERP; SupportX itself never refunds and never
- * writes to the ERP.
+ * credit note is done in the ERP. The tick itself writes nothing to the ERP;
+ * credit note drafts made from the case (services/credit-notes.ts) are shown.
  */
 export type RefundFilter = "open" | "done" | "all";
 
@@ -28,7 +28,9 @@ async function candidates(db: Queryable, ws: string): Promise<RefundCandidate[]>
               'orderNumber', ol.snapshot->'orderNumber', 'orderNumberAtCustomer', ol.snapshot->'orderNumberAtCustomer',
               'lines', coalesce(ol.snapshot->'lines', '[]'), 'invoices', coalesce(ol.snapshot->'invoices', '[]'), 'returns', ol.snapshot->'returns') END AS snapshot,
             e.id AS entry_id, e.added_manually, e.removed_at, e.amount_cents, e.currency, e.note, e.credit_note_number, e.done_at, e.updated_at AS entry_updated_at,
-            du.display_name AS done_by_name
+            du.display_name AS done_by_name,
+            (SELECT jsonb_agg(jsonb_build_object('number', cn.credit_note_number, 'state', cn.state, 'cents', coalesce(cn.result_cents, cn.total_cents), 'at', cn.created_at) ORDER BY cn.created_at)
+               FROM erp_credit_notes cn WHERE cn.workspace_id = c.workspace_id AND cn.conversation_id = c.id AND cn.state IN ('pending','created','needs_review','uncertain')) AS credit_note_drafts
        FROM conversations c
        LEFT JOIN order_links ol ON ol.workspace_id = c.workspace_id AND ol.conversation_id = c.id AND ol.is_current AND ol.status = 'unique'
        LEFT JOIN refund_entries e ON e.workspace_id = c.workspace_id AND e.conversation_id = c.id
@@ -75,6 +77,7 @@ async function candidates(db: Queryable, ws: string): Promise<RefundCandidate[]>
           updatedAt: iso(r.entry_updated_at),
         }
       : null,
+    creditNoteDrafts: Array.isArray(r.credit_note_drafts) ? r.credit_note_drafts : [],
   }));
 }
 
