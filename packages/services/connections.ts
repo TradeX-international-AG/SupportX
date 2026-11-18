@@ -245,7 +245,7 @@ export async function loadCategoryRules(q: Queryable, workspaceId: string): Prom
 // ---------------------------------------------------------------------------
 // Setup (owner only). Secrets are written once and never returned.
 
-const PLATFORMS: ReadonlyArray<SourcePlatform> = ["email", "amazon", "ebay", "kaufland", "shop_apotheke", "docmorris", "shopify"];
+const PLATFORMS: ReadonlyArray<SourcePlatform> = ["email", "amazon", "ebay", "kaufland", "shop_apotheke", "docmorris", "shopify", "phone"];
 
 export function assertPlatform(value: string): SourcePlatform {
   if (!PLATFORMS.includes(value as SourcePlatform)) throw new ServiceError(400, "INVALID", `Unbekannte Plattform: ${value}`);

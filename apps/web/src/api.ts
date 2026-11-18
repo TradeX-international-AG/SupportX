@@ -29,7 +29,7 @@ export const fmtDate = (value: unknown): string => {
 };
 
 export const PLATFORM_LABEL: Record<string, string> = {
-  email: "E-Mail", amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris", shopify: "Shopify",
+  email: "E-Mail", amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris", shopify: "Shopify", phone: "Telefon",
 };
 
 export const MATCH_LABEL: Record<string, { label: string; tone: "ok" | "warn" | "bad" | "muted" }> = {

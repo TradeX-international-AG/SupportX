@@ -32,7 +32,9 @@ export type SourcePlatform =
   | "kaufland"
   | "shop_apotheke"
   | "docmorris"
-  | "shopify";
+  | "shopify"
+  /** A call to the phone hotline (voice agent); answered by a new mail to the address weclapp keeps for the order. */
+  | "phone";
 
 export interface MessageAddress {
   address: string;
@@ -87,6 +89,11 @@ export interface ReplyRequest {
   outboxMarker: string;
   /** Files approved together with the text (PDFs from the workspace documents). */
   attachments?: ReplyAttachment[];
+  /**
+   * Phone cases have no message to reply to: the answer goes out as a new mail to
+   * the address weclapp keeps for the order (never one the caller named). Mail only.
+   */
+  newMail?: { to: string; subject: string };
 }
 
 export interface ReplyAttachment {
@@ -332,6 +339,18 @@ export interface OrderProvider {
    * A person checks and books it in the ERP.
    */
   createCreditNoteDraft?(invoiceId: string, input: CreditNoteDraftInput): Promise<CreditNoteDraftResult>;
+  /** What a caller must know about the order and where its invoices go (phone hotline). Read only, never stored. */
+  callerCheck?(orderId: string): Promise<CallerCheckData>;
+}
+
+/** Order addresses for checking a caller; kept only for the duration of one tool call. */
+export interface CallerCheckData {
+  /** Postal codes of the invoice, delivery and record address (and of shipments). */
+  postalCodes: ReadonlyArray<string>;
+  /** Last names on those addresses (company names are too guessable). */
+  lastNames: ReadonlyArray<string>;
+  /** Where weclapp sends invoices for this order: salesInvoiceEmailAddresses, else recordEmailAddresses (toAddresses). */
+  invoiceEmails: ReadonlyArray<string>;
 }
 
 // ---------------------------------------------------------------------------

@@ -127,18 +127,25 @@ export interface CaseParcelTracking {
  * Status of the case's DHL parcels. Asks DHL only for numbers without a fresh
  * answer (delivered stays; others after 2 h; force = the "Neu abrufen" click, at
  * most every 5 min per number). Called when a person opens the case and on click;
- * the worker and the AI never trigger calls.
+ * the worker and the AI never trigger calls (a verified caller of the phone hotline may).
  */
 export async function trackCaseParcels(ctx: AppContext, actor: Actor, conversationId: string, opts: { force?: boolean } = {}): Promise<CaseParcelTracking> {
   requireRole(actor, ["owner", "agent", "viewer"]);
-  const ws = actor.workspaceId;
-  const targets = await caseTargets(ctx.db, ws, conversationId);
+  const targets = await caseTargets(ctx.db, actor.workspaceId, conversationId);
+  return trackParcels(ctx, actor.workspaceId, targets, { force: !!opts.force && actor.type === "user" });
+}
+
+/**
+ * Status of given parcel numbers, with the same cache and limits as the case view.
+ * Also used by the phone hotline for a verified caller (never with force).
+ */
+export async function trackParcels(ctx: AppContext, ws: string, targets: ReadonlyArray<ParcelTarget>, opts: { force?: boolean } = {}): Promise<CaseParcelTracking> {
   const row = await loadConnection(ctx.db, ws);
   const stored = await storedResults(ctx.db, ws, targets.map((t) => t.trackingNumber));
   if (!row || targets.length === 0) return { connected: !!row, parcels: targets.map((target) => ({ target, result: stored.get(target.trackingNumber) })) };
 
   const now = ctx.now();
-  const due = targets.filter((t) => needsFetch(stored.get(t.trackingNumber), now, !!opts.force && actor.type === "user"));
+  const due = targets.filter((t) => needsFetch(stored.get(t.trackingNumber), now, !!opts.force));
   let limited = false;
   if (due.length > 0) {
     const client = await clientFor(ctx, ctx.db, row);

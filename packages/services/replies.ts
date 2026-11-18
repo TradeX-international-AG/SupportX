@@ -616,12 +616,14 @@ export async function dispatchOutbox(ctx: AppContext, workspaceId: string, outbo
       return null;
     }
     await tx.query("UPDATE outbox SET state = 'dispatching', attempts = attempts + 1, dispatched_at = now(), updated_at = now() WHERE id = $1", [outboxId]);
-    const inbound = await one<{ external_message_id: string; external_thread_key: string }>(
+    const inbound = await one<{ external_message_id: string; external_thread_key: string; source_platform: string; customer_address: string | null; subject: string }>(
       tx,
-      "SELECT m.external_message_id, c.external_thread_key FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.workspace_id = $1 AND m.id = $2",
+      "SELECT m.external_message_id, c.external_thread_key, c.source_platform, c.customer_address, c.subject FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.workspace_id = $1 AND m.id = $2",
       [workspaceId, row.in_reply_to_message_id],
     );
-    return { row, inboundExternalId: inbound!.external_message_id, threadKey: inbound!.external_thread_key };
+    // A phone case has no mail to reply to: a new mail to the address weclapp keeps for the order.
+    const newMail = inbound!.source_platform === "phone" && inbound!.customer_address ? { to: inbound!.customer_address, subject: /Bestellung (\S+)/.exec(inbound!.subject) ? `Ihre Bestellung ${/Bestellung (\S+)/.exec(inbound!.subject)![1]}` : "Ihr Anruf bei uns" } : undefined;
+    return { row, inboundExternalId: inbound!.external_message_id, threadKey: inbound!.external_thread_key, newMail, phone: inbound!.source_platform === "phone" };
   });
   if (!reserved) return "skipped";
 
@@ -635,7 +637,10 @@ export async function dispatchOutbox(ctx: AppContext, workspaceId: string, outbo
     outcome = { state: "rejected", error: (error as Error).message, retryable: false };
   }
   try {
-    if (!outcome) outcome = await (await channelFor(ctx, ctx.db, connection)).sendReply({ inReplyToExternalId: reserved.inboundExternalId, externalThreadKey: reserved.threadKey, bodyText: reserved.row.body, outboxMarker: outboxId, ...(attachments.length ? { attachments } : {}) });
+    if (!outcome && reserved.phone && (!reserved.newMail || connection.kind !== "microsoft_graph")) {
+      outcome = { state: "rejected", error: "Für diesen Anruf ist keine Mailadresse aus weclapp hinterlegt; es wurde nichts verschickt.", retryable: false };
+    }
+    if (!outcome) outcome = await (await channelFor(ctx, ctx.db, connection)).sendReply({ inReplyToExternalId: reserved.inboundExternalId, externalThreadKey: reserved.threadKey, bodyText: reserved.row.body, outboxMarker: outboxId, ...(attachments.length ? { attachments } : {}), ...(reserved.newMail ? { newMail: reserved.newMail } : {}) });
   } catch (error) {
     outcome = { state: "uncertain" as const, error: (error as Error).message };
   }

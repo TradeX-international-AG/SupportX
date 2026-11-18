@@ -131,6 +131,15 @@ export async function ingestMessage(tx: Tx, connection: ChannelConnectionRow, ru
   }
 
   let conversation = await conversationForThread(tx, ws, connection.id, message.externalThreadKey);
+  if (!conversation && outboxId) {
+    // Our send started a new thread (phone case answered by a new mail): it belongs to
+    // the case it was sent from, and so does the customer's answer in that thread.
+    const owner = await one<{ conversation_id: string }>(tx, "SELECT conversation_id FROM outbox WHERE workspace_id = $1 AND id = $2", [ws, outboxId]);
+    if (owner) {
+      await tx.query("INSERT INTO conversation_threads (workspace_id, connection_id, external_thread_key, conversation_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING", [ws, connection.id, message.externalThreadKey, owner.conversation_id]);
+      conversation = await conversationForThread(tx, ws, connection.id, message.externalThreadKey);
+    }
+  }
   if (!conversation) {
     // Our own mail that does not belong to a known case is not a support case.
     if (message.direction === "outbound") return "ignored_unrelated_outbound";

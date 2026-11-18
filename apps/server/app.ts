@@ -47,6 +47,7 @@ import { attachCaseInvoices, draftInvoiceReply, fetchCaseInvoices } from "../../
 import { deleteLogo, getLogo, logoVersion, previewDesign, resetDesign, saveDesign, saveLogo, workspaceTheme } from "../../packages/services/design.ts";
 import { writeDesignMd, type WorkspaceTheme } from "../../packages/core/design-md.ts";
 import { checkDhlConnection, deleteDhlConnection, getDhlSettings, saveDhlConnection, trackCaseParcels } from "../../packages/services/dhl-tracking.ts";
+import { createPhoneToken, deletePhoneConnection, getPhoneSettings, handlePhoneWebhook, phoneInvoiceRequest, phoneOrderStatus, savePhoneSettings, workspaceForToolToken } from "../../packages/services/phone.ts";
 import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection, setAmazonRefundsEnabled } from "../../packages/services/amazon-listings.ts";
 import { createCreditNote, lookupCreditNote, setCreditNotesEnabled, settleUncertainCreditNote } from "../../packages/services/credit-notes.ts";
 import { checkAmazonRefund, issueAmazonRefund, lookupAmazonRefundOrder, settleUncertainAmazonRefund } from "../../packages/services/amazon-refunds.ts";
@@ -693,6 +694,46 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     const params = req.params as { id: string; platform: string };
     await revokeReplyRoute(ctx, await actor(req), params.id, params.platform);
     return { ok: true };
+  });
+
+  // --- Phone hotline (voice agent) ---------------------------------------------
+  // Settings (owner). The tool token is shown once on creation, then only "••••abcd".
+  app.get("/api/w/:ws/phone", async (req) => getPhoneSettings(ctx, await actor(req)));
+  app.post("/api/w/:ws/phone/token", async (req) => createPhoneToken(ctx, await actor(req)));
+  app.put("/api/w/:ws/phone", async (req) => {
+    const body = parse(z.object({ webhookSecret: z.string().max(300).optional(), transcriptMode: z.enum(["summary", "transcript"]).optional(), handoverNumber: z.string().max(40).nullable().optional() }), req.body);
+    await savePhoneSettings(ctx, await actor(req), body);
+    return { ok: true };
+  });
+  app.delete("/api/w/:ws/phone", async (req) => {
+    await deletePhoneConnection(ctx, await actor(req));
+    return { ok: true };
+  });
+  // Tools the agent calls during a call ("Authorization: Bearer sxv_…"). Same answer for a
+  // wrong token and an unknown route, so the endpoint reveals nothing.
+  const toolBody = z.object({
+    call_id: z.string().min(6).max(120),
+    caller_id: z.string().max(40).optional(),
+    order_number: z.string().max(60).optional(),
+    check: z.string().max(100).optional(),
+  });
+  for (const [path, tool] of [["/voice/tools/order-status", phoneOrderStatus], ["/voice/tools/invoice", phoneInvoiceRequest]] as const) {
+    app.post(path, async (req, reply) => {
+      const ws = await workspaceForToolToken(ctx, req.headers.authorization);
+      if (!ws) return reply.status(401).send({ ok: false, say: "Nicht berechtigt." });
+      const body = parse(toolBody, req.body);
+      return tool(ctx, ws, { callId: body.call_id, callerId: body.caller_id, orderNumber: body.order_number, check: body.check });
+    });
+  }
+  // ElevenLabs post-call webhook, signed with the workspace's webhook secret (raw body needed).
+  app.register(async (hook) => {
+    hook.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: 2_000_000 }, (_req, body, done) => done(null, body));
+    hook.post("/webhooks/elevenlabs/:connectionId", async (req, reply) => {
+      const header = req.headers["elevenlabs-signature"];
+      const result = await handlePhoneWebhook(ctx, (req.params as { connectionId: string }).connectionId, typeof req.body === "string" ? req.body : "", Array.isArray(header) ? header[0] : header);
+      if (result.status >= 400) req.log.warn({ reason: result.reason }, "ElevenLabs-Webhook nicht angenommen");
+      return reply.code(result.status).send();
+    });
   });
 
   // --- Microsoft Graph change notifications (optional push trigger) -------------

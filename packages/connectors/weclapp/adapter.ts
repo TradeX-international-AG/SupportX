@@ -1,4 +1,5 @@
 import type {
+  CallerCheckData,
   CreditNoteDraftInput,
   CreditNoteDraftResult,
   CreditSourceInvoice,
@@ -284,6 +285,36 @@ function orderIdsOf(record: Json): string[] {
   return [str(record.salesOrderId), str(record.mainSalesOrderId), ...arr(record.salesOrders).map((o) => str(o.id))].filter((id): id is string => !!id);
 }
 
+/** One address list as weclapp writes it ("a@x.de; b@y.de" or comma separated). */
+function splitAddresses(value: unknown): string[] {
+  return (str(value) ?? "").split(/[;,]/).map((a) => a.trim()).filter((a) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a));
+}
+
+/**
+ * Caller check data from a salesOrder (OpenAPI: invoiceAddress, deliveryAddress,
+ * recordAddress with zipcode and lastName; salesInvoiceEmailAddresses and
+ * recordEmailAddresses with toAddresses). Invoices go to the invoice addresses when
+ * weclapp has some, else to the record addresses.
+ */
+export function mapCallerCheck(order: Json, shipments: Json[] = []): CallerCheckData {
+  const addresses = ["invoiceAddress", "deliveryAddress", "recordAddress"]
+    .map((k) => order[k])
+    .filter((a): a is Json => !!a && typeof a === "object");
+  const recipients = shipments.map((s) => s.recipientAddress).filter((a): a is Json => !!a && typeof a === "object");
+  const all = [...addresses, ...recipients];
+  const uniq = (values: Array<string | undefined>) => [...new Set(values.filter((v): v is string => !!v))];
+  const mails = (k: string) => {
+    const box = order[k];
+    return box && typeof box === "object" ? splitAddresses((box as Json).toAddresses) : [];
+  };
+  const invoice = mails("salesInvoiceEmailAddresses");
+  return {
+    postalCodes: uniq(all.map((a) => str(a.zipcode))),
+    lastNames: uniq(all.map((a) => str(a.lastName))),
+    invoiceEmails: [...new Set(invoice.length ? invoice : mails("recordEmailAddresses"))],
+  };
+}
+
 export class WeclappOrderProvider implements OrderProvider {
   readonly kind = "weclapp" as const;
   readonly #config: WeclappConfig;
@@ -527,6 +558,14 @@ export class WeclappOrderProvider implements OrderProvider {
     } catch (error) {
       return toLookupError(error);
     }
+  }
+
+  /** GET only: the order's addresses for the phone hotline's caller check. */
+  async callerCheck(orderId: string): Promise<CallerCheckData> {
+    const row = (await this.#get("salesOrder", { "id-eq": orderId, pageSize: "1" })).find((r) => String(r.id) === orderId);
+    if (!row) throw new Error("Auftrag nicht gefunden.");
+    const shipments = await this.#get("shipment", { "mainSalesOrderId-eq": orderId, pageSize: "20" }).catch(() => [] as Json[]);
+    return mapCallerCheck(row, shipments);
   }
 
   /** GET only: weclapp renders the latest invoice document; nothing is created or changed. */

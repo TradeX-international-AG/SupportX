@@ -306,6 +306,20 @@ export class GraphMailChannel implements MessageChannel {
 
   async sendReply(request: ReplyRequest): Promise<ReplyOutcome> {
     try {
+      if (request.newMail) {
+        // Phone case: nothing to reply to, a new mail to the order's address in weclapp.
+        await this.#call("POST", `${this.#mailboxPath()}/sendMail`, {
+          message: {
+            subject: request.newMail.subject,
+            body: { contentType: "HTML", content: textToHtml(request.bodyText) },
+            toRecipients: [{ emailAddress: { address: request.newMail.to } }],
+            internetMessageHeaders: [{ name: OUTBOX_HEADER, value: request.outboxMarker }],
+            ...(request.attachments?.length ? { attachments: request.attachments.map((a) => ({ "@odata.type": "#microsoft.graph.fileAttachment", name: a.name, contentType: a.contentType, contentBytes: a.data.toString("base64") })) } : {}),
+          },
+          saveToSentItems: true,
+        });
+        return { state: "provider_accepted" };
+      }
       await this.#call("POST", `${this.#mailboxPath()}/messages/${encodeURIComponent(request.inReplyToExternalId)}/reply`, {
         message: {
           internetMessageHeaders: [{ name: OUTBOX_HEADER, value: request.outboxMarker }],

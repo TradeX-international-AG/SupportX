@@ -58,7 +58,7 @@ export function maskAddresses(text: string): string {
   return text.replace(EMAIL_IN_TEXT, "[Adresse entfernt]");
 }
 
-const PLATFORM_NAME: Record<string, string> = { amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris", shopify: "Shopify", email: "E-Mail" };
+const PLATFORM_NAME: Record<string, string> = { amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris", shopify: "Shopify", email: "E-Mail", phone: "Telefon" };
 
 /** Body of a relay-safe forward: own comment, then the original text with all addresses removed. */
 export function forwardText(input: { comment: string; platform: string; receivedAt: Date | string; subject: string; direction: "inbound" | "outbound"; body: string; leftOut?: ReadonlyArray<string> }): string {

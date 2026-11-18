@@ -9,7 +9,7 @@ import { many, one } from "../storage/db.ts";
 import { audit } from "./audit.ts";
 import { requireRole, ServiceError, type Actor, type AppContext } from "./context.ts";
 
-const PLATFORM: Record<string, string> = { email: "E-Mail", amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris", shopify: "Shopify" };
+const PLATFORM: Record<string, string> = { email: "E-Mail", amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris", shopify: "Shopify", phone: "Telefon" };
 const when = (iso: string | Date | null | undefined) =>
   iso ? new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
 

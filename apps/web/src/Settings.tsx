@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AmazonListingsCard } from "./AmazonListingsSettings.tsx";
 import { DhlTrackingCard } from "./DhlTracking.tsx";
+import { PhoneHotlineCard } from "./PhoneHotline.tsx";
 import { api, fmtDate, PLATFORM_LABEL, ROLE_HINT, ROLE_LABEL } from "./api.ts";
 import { DEADLINE_PLATFORMS, DEFAULT_REPLY_DEADLINES, MAX_DEADLINE_HOURS } from "../../../packages/core/deadline.ts";
 import { isStale, sinceLabel } from "../../../packages/core/fetch-freshness.ts";
@@ -160,6 +161,7 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
       </SetupCard>
 
       <DhlTrackingCard base={base} owner={owner} />
+      <PhoneHotlineCard base={base} owner={owner} />
       </>}
 
       {tab === "marktplaetze" && <>
