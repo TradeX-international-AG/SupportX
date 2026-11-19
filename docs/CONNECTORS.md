@@ -26,6 +26,38 @@ The eBay, Kaufland and Mirakl adapters live in `packages/connectors/{ebay,kaufla
 - put the marketplace order id into the case subject with a label (`Bestellung …`) so the normal reference extraction looks it up in weclapp; a listing id is never treated as an order id;
 - poll in bounded intervals (`pollIntervalSec`, eBay and Kaufland 5 min). Mirakl is read while the SupportX inbox is on screen (at most every 10 min per connection, only in a visible tab) and when someone clicks *Jetzt abrufen*, until the owner records the operator's permission for background reads. Connections not read for more than 4 hours are flagged in the inbox and on their card.
 
+## More marketplaces (0.19.0, 2026-11-19)
+
+Requested by the project owner: every marketplace ASEIO connects to, through
+its API where one exists. Which developer apps still have to be applied for is
+listed in [MARKTPLATZ-APPS.md](MARKTPLATZ-APPS.md).
+
+- **Mirakl marketplaces:** Douglas, MediaMarkt/Saturn, Conrad and Decathlon run
+  on Mirakl like Shop Apotheke. Each is its own platform (card, seller account,
+  reply deadline, messaging check) on the same `mirakl_inbox` adapter; the
+  connection's `default_source_platform` names the operator. No operator
+  address is built in. Same "synchronous only" rule as Shop Apotheke.
+- **OTTO Market:** OTTO has no customer-message API (checked against the
+  interface list on api.otto.market, OTTO-1). Customer contacts arrive by
+  e-mail and are a mail market like DocMorris. The OTTO Orders API v4 is
+  connected separately (`marketplace_api_connections`, own app with scope
+  `orders`, client credentials) and only used for the order status in the case.
+- **Order status in the case ("Bei … nachsehen"):** read-only, on a person's
+  click, never for the worker or the AI, never in a draft. Kaufland
+  `GET /orders/{id_order}` (order units grouped per article and status),
+  Mirakl OR11 `GET /api/orders?order_ids=` (state per line, tracking,
+  refunds), OTTO `GET /v4/orders/{orderNumber}` (fulfillmentStatus per
+  position item). Order numbers are restricted to `[A-Za-z0-9_-]` before they
+  go into a URL. eBay needs the extra scope `sell.fulfillment.readonly`
+  (seller re-login), not built.
+- **Temu:** not built. Buyer messages live in the Seller Center chat; no
+  public message API for EU sellers was found, and the Open API needs an
+  approved partner app. See MARKTPLATZ-APPS.md.
+
+All of it is tested only against local test doubles
+(`packages/testing/fake-marketplaces.ts`); no live Douglas, MediaMarkt/Saturn,
+Conrad, Decathlon or OTTO account has been connected.
+
 ## Preparing native channels (M3, original notes)
 
 All channels implement `MessageChannel` in `packages/core/contracts.ts` (`sync`, `sendReply`, `reconcileReply`, `checkAccess`, declared `capabilities`). Rules for the next adapters:

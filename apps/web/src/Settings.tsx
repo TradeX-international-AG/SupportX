@@ -7,7 +7,9 @@ import { DEADLINE_PLATFORMS, DEFAULT_REPLY_DEADLINES, MAX_DEADLINE_HOURS } from 
 import { isStale, sinceLabel } from "../../../packages/core/fetch-freshness.ts";
 import { SNIPPET_PLACEHOLDERS } from "../../../packages/core/snippet-placeholders.ts";
 import { DEFAULT_SETTINGS_TAB, parseSettingsTab, SETTINGS_TABS, settingsHash, tabAlerts, type SettingsTab } from "./settings-tabs.ts";
-import { API_MARKETS, MAIL_MARKETS, MARKET_KIND, marketSetup, microsoftSetup, weclappSetup, type ChannelSetup, type StepAction } from "./setup-steps.ts";
+import { ALL_PLATFORMS } from "../../../packages/core/marketplaces.ts";
+import { OttoApiSection } from "./OttoApi.tsx";
+import { API_MARKETS, isMiraklMarket, MAIL_MARKETS, marketConnections, marketSetup, microsoftSetup, weclappSetup, type ChannelSetup, type StepAction } from "./setup-steps.ts";
 
 type Role = "owner" | "agent" | "viewer";
 interface Account { id: string; name: string; platform: string; order_scope_field: string; order_scope_value: string; paused: boolean }
@@ -33,9 +35,11 @@ interface SettingsData {
   catalog: Descriptor[]; ai: { provider: string; model: string; promptVersion: string }; sendMode: string; demoMode: boolean; ebayOperatorApp?: boolean;
 }
 
-const PLATFORMS = ["email", "amazon", "ebay", "kaufland", "shop_apotheke", "docmorris", "shopify"];
+const PLATFORMS = ALL_PLATFORMS.filter((p) => p !== "phone");
 const IMPL_LABEL: Record<string, string> = { implemented: "umgesetzt", via_microsoft_mail: "über Microsoft-Postfach", planned: "geplant" };
-const KIND_LABEL: Record<ChannelKind, string> = { microsoft_graph: "Microsoft-Postfach", ebay_messages: "eBay", kaufland_tickets: "Kaufland", mirakl_inbox: "Shop Apotheke" };
+const KIND_LABEL: Record<ChannelKind, string> = { microsoft_graph: "Microsoft-Postfach", ebay_messages: "eBay", kaufland_tickets: "Kaufland", mirakl_inbox: "Mirakl" };
+/** Name of the marketplace behind a connection (Mirakl connections: the operator, e.g. Douglas). */
+const connectionMarket = (c: Connection) => (c.kind === "mirakl_inbox" ? PLATFORM_LABEL[c.default_source_platform] ?? KIND_LABEL[c.kind] : KIND_LABEL[c.kind]);
 const CAP_LABEL: Record<string, string> = { not_implemented: "nicht umgesetzt", documented: "dokumentiert, ungetestet", configured: "umgesetzt, Kontotest offen", verified: "mit Konto geprüft" };
 
 export function Settings({ workspaceId, role }: { workspaceId: string; role: Role }) {
@@ -166,12 +170,13 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
 
       {tab === "marktplaetze" && <>
       {[...API_MARKETS, ...MAIL_MARKETS].map((m) => {
-        const kind = (API_MARKETS as readonly string[]).includes(m) ? MARKET_KIND[m as (typeof API_MARKETS)[number]] : null;
-        const own = kind ? data.connections.filter((c) => c.kind === kind) : [];
+        const apiMarket = (API_MARKETS as readonly string[]).includes(m) ? (m as (typeof API_MARKETS)[number]) : null;
+        const kind = apiMarket ? apiMarket : null;
+        const own = apiMarket ? marketConnections(apiMarket, data.connections) : [];
         const graph = data.connections.find((c) => c.kind === "microsoft_graph");
         const open = (a: string) => panel?.card === m && panel.action === a;
         const onAction = (a: StepAction) => {
-          if (a === "check" && kind) return checkFirst(kind);
+          if (a === "check" && own[0]) return void act(() => api("POST", `${base}/connections/${own[0]!.id}/check`), checkResult);
           if (a === "confirm" || a === "unconfirm") return void act(() => api("POST", `${base}/setup-confirmations`, { platform: m, done: a === "confirm" }), () => a === "confirm" ? "Abgehakt." : "Haken entfernt.");
           if (a === "credentials") return setPanel({ card: m, action: a, id: (own.find((c) => c.health === "error") ?? own[0])?.id });
           if (a === "ebay_login" && (own[0] || data.ebayOperatorApp)) {
@@ -196,7 +201,8 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
             {own.map((c) => connectionCard(c))}
             {owner && open("connect") && m === "ebay" && <EbayForm onCancel={closePanel} onSubmit={(body) => { closePanel(); void act(() => api("POST", `${base}/connections/ebay`, body), () => "eBay angelegt. Jetzt „Bei eBay anmelden“ klicken."); }} />}
             {owner && open("connect") && m === "kaufland" && <KauflandForm onCancel={closePanel} onSubmit={(body) => { closePanel(); void act(() => api("POST", `${base}/connections/kaufland`, body), () => "Kaufland verbunden. Bitte einmal „Verbindung testen“."); }} />}
-            {owner && open("connect") && m === "shop_apotheke" && <MiraklForm onCancel={closePanel} onSubmit={(body) => { closePanel(); void act(() => api("POST", `${base}/connections/mirakl`, body), () => "Shop Apotheke verbunden. Bitte einmal „Verbindung testen“."); }} />}
+            {owner && open("connect") && isMiraklMarket(m) && <MiraklForm platform={m} name={PLATFORM_LABEL[m] ?? m} onCancel={closePanel} onSubmit={(body) => { closePanel(); void act(() => api("POST", `${base}/connections/mirakl`, body), () => `${PLATFORM_LABEL[m]} verbunden. Bitte einmal „Verbindung testen“.`); }} />}
+            {m === "otto" && <OttoApiSection base={base} owner={owner} />}
           </SetupCard>
         );
       })}
@@ -352,7 +358,7 @@ function explainError(raw: string): string {
 
 /**
  * Mirakl documents inbox reads as "synchronous only — at each page that includes
- * an inbox display". SupportX therefore reads Shop Apotheke while its inbox is
+ * an inbox display". SupportX therefore reads Mirakl marketplaces while its inbox is
  * open (at most every 10 minutes) and around the clock only after the operator's
  * permission is recorded here.
  */
@@ -361,21 +367,22 @@ function MiraklFetchMode({ c, owner, base, act }: { c: Connection; owner: boolea
   const [note, setNote] = useState("");
   const allowed = !!c.config.backgroundSyncAllowed;
   const minutes = Math.round((c.config.pollIntervalSec ?? 900) / 60);
+  const name = PLATFORM_LABEL[c.default_source_platform] ?? "der Marktplatz";
   if (allowed) {
     return (
       <div className="notice small">
         Automatischer Abruf alle {minutes} Min., auch wenn niemand den Posteingang offen hat. Freigabe: {c.config.backgroundSyncEvidence}
-        {owner && <> <button className="link" onClick={() => { if (window.confirm("Automatischen Abruf ausschalten? Dann wird Shop Apotheke nur noch abgerufen, solange der Posteingang offen ist.")) void act(() => api("POST", `${base}/connections/${c.id}/mirakl-background-sync`, { allowed: false }), () => "Automatischer Abruf aus."); }}>Ausschalten</button></>}
+        {owner && <> <button className="link" onClick={() => { if (window.confirm(`Automatischen Abruf ausschalten? Dann wird ${name} nur noch abgerufen, solange der Posteingang offen ist.`)) void act(() => api("POST", `${base}/connections/${c.id}/mirakl-background-sync`, { allowed: false }), () => "Automatischer Abruf aus."); }}>Ausschalten</button></>}
       </div>
     );
   }
   return (
     <div className="notice small">
-      Shop Apotheke wird automatisch abgerufen, sobald jemand SupportX öffnet, und danach alle 10 Min., solange der Posteingang offen ist. So sieht es Mirakl vor. Rund um die Uhr erst, wenn Shop Apotheke das erlaubt.
+      {name} wird automatisch abgerufen, sobald jemand SupportX öffnet, und danach alle 10 Min., solange der Posteingang offen ist. So sieht es Mirakl vor. Rund um die Uhr erst, wenn {name} das erlaubt.
       {owner && !open && <> <button className="link" onClick={() => setOpen(true)}>Freigabe eintragen</button></>}
       {owner && open && (
         <form className="stack" onSubmit={(e) => { e.preventDefault(); void act(() => api("POST", `${base}/connections/${c.id}/mirakl-background-sync`, { allowed: true, evidenceNote: note }), () => `Automatischer Abruf an, alle ${minutes} Min.`).then(() => { setOpen(false); setNote(""); }); }}>
-          <label>Wo hat Shop Apotheke den automatischen Abruf erlaubt?
+          <label>Wo hat {name} den automatischen Abruf erlaubt?
             <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="z. B. Mail von Partner-Management vom 14.11., Ticket-Nr. …" />
           </label>
           <div className="row"><button className="primary" type="submit" disabled={note.trim().length < 10}>Automatischen Abruf einschalten</button><button type="button" onClick={() => setOpen(false)}>Abbrechen</button></div>
@@ -393,7 +400,7 @@ function ConnectionCard({ c, owner, duplicate, base, act, checkResult, credentia
   const [secretOpen, setSecretOpen] = useState(false);
   const status = c.paused ? { label: "Pausiert", cls: "pill warn" } : c.health === "ok" ? { label: "Verbunden", cls: "pill ok" } : c.health === "error" ? { label: "Fehler", cls: "pill bad" } : { label: "Noch nicht geprüft", cls: "pill muted" };
   const graph = c.kind === "microsoft_graph";
-  const where = graph ? `im Microsoft-Postfach` : `bei ${KIND_LABEL[c.kind]}`;
+  const where = graph ? `im Microsoft-Postfach` : `bei ${connectionMarket(c)}`;
   const ident = graph ? c.config.mailbox : c.kind === "ebay_messages" ? c.config.sellerUsername ?? "noch nicht angemeldet" : c.kind === "mirakl_inbox" ? c.config.baseUrl : c.config.storefronts?.length ? `Storefronts ${c.config.storefronts.join(", ")}` : "alle Storefronts";
   const ebayLogin = () => act(async () => { const r = await api<{ url: string }>("POST", `${base}/connections/${c.id}/ebay/authorize`); window.location.assign(r.url); });
   const remove = () => {
@@ -404,7 +411,7 @@ function ConnectionCard({ c, owner, duplicate, base, act, checkResult, credentia
     <div className="connection">
       <div className="conn-head">
         <div>
-          <div className="row wrap"><strong className="conn-name">{c.display_name}</strong><span className="pill muted">{KIND_LABEL[c.kind] ?? c.kind}</span><span className={status.cls}>{status.label}</span></div>
+          <div className="row wrap"><strong className="conn-name">{c.display_name}</strong><span className="pill muted">{connectionMarket(c)}</span><span className={status.cls}>{status.label}</span></div>
           <div className="muted small"><code>{ident}</code> · Letzter Abruf: {c.last_sync_at ? fmtDate(c.last_sync_at) : "noch nie"}</div>
         </div>
         {owner && (
@@ -762,13 +769,13 @@ function CredentialsForm({ kind, onSubmit, onCancel }: { kind: ChannelKind; onSu
   );
 }
 
-function MiraklForm({ onSubmit, onCancel }: { onSubmit: (body: unknown) => void; onCancel: () => void }) {
-  const [form, setForm] = useState({ displayName: "Shop Apotheke", baseUrl: "", apiKey: "", shopId: "" });
+function MiraklForm({ platform, name, onSubmit, onCancel }: { platform: string; name: string; onSubmit: (body: unknown) => void; onCancel: () => void }) {
+  const [form, setForm] = useState({ displayName: name, baseUrl: "", apiKey: "", shopId: "" });
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value });
   return (
-    <form className="stack inset" onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, apiKey: form.apiKey.trim(), shopId: form.shopId.trim() || undefined });  }}>
-      <h4>Shop Apotheke verbinden</h4>
-      <p className="muted small">Shop Apotheke läuft auf Mirakl. Adresse und API-Schlüssel stehen im Mirakl-Backoffice oben rechts unter dem Benutzer → API-Schlüssel. Gelesen wird automatisch beim Öffnen von SupportX, danach alle 10 Min., solange der Posteingang offen ist, und per Klick auf „Jetzt abrufen“.</p>
+    <form className="stack inset" onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, platform, apiKey: form.apiKey.trim(), shopId: form.shopId.trim() || undefined });  }}>
+      <h4>{name} verbinden</h4>
+      <p className="muted small">{name} läuft auf Mirakl. Adresse und API-Schlüssel stehen im Mirakl-Backoffice oben rechts unter dem Benutzer → API-Schlüssel. Gelesen wird automatisch beim Öffnen von SupportX, danach alle 10 Min., solange der Posteingang offen ist, und per Klick auf „Jetzt abrufen“.</p>
       <label>Name<input value={form.displayName} onChange={set("displayName")} required /></label>
       <label>Adresse der Instanz<input placeholder="https://….mirakl.net" value={form.baseUrl} onChange={set("baseUrl")} required /></label>
       <HiddenField label="API-Schlüssel" value={form.apiKey} onChange={(v) => setForm({ ...form, apiKey: v })} />

@@ -25,16 +25,10 @@ export interface ConnectorCapabilities {
   sendReconciliation: CapabilityState;
 }
 
-export type SourcePlatform =
-  | "email"
-  | "amazon"
-  | "ebay"
-  | "kaufland"
-  | "shop_apotheke"
-  | "docmorris"
-  | "shopify"
-  /** A call to the phone hotline (voice agent); answered by a new mail to the address weclapp keeps for the order. */
-  | "phone";
+import type { MarketplaceOrderView } from "./marketplace-order.ts";
+
+export type { SourcePlatform } from "./marketplaces.ts";
+import type { SourcePlatform } from "./marketplaces.ts";
 
 export interface MessageAddress {
   address: string;
@@ -164,6 +158,8 @@ export interface MessageChannel {
   reconcileReply(marker: string, since: Date, threadKey: string, sentBody: string): Promise<ReconcileOutcome>;
   /** Cheap connectivity/permission check for the setup screen. */
   checkAccess(): Promise<{ ok: boolean; detail: string }>;
+  /** The order as the marketplace shows it, read on a person's click (marketplace API channels only). Null = not found. */
+  lookupOrder?(orderId: string): Promise<MarketplaceOrderView | null>;
   /** The invoice document as the ERP renders it (read-only), for attaching to a reply. */
   downloadInvoicePdf?(invoiceId: string): Promise<{ data: Buffer; contentType: string }>;
 }

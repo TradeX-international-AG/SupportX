@@ -1,6 +1,7 @@
 import type { AttachmentFile, AttachmentInfo, ConnectorCapabilities, IngressMessage, MessageAddress, MessageChannel, ReconcileOutcome, ReplyOutcome, ReplyRequest, SyncResult } from "../../core/contracts.ts";
 import { assertAllowedEndpoint, HttpError, requestBinary, requestJson } from "../http.ts";
 import { cursorStart, isoOrNow, sameText, sendFailure, threadId } from "../marketplace-common.ts";
+import { MIRAKL_STATE_DE, statusLabel, type MarketplaceOrderView } from "../../core/marketplace-order.ts";
 
 /**
  * Mirakl seller inbox (Shop Apotheke runs on Mirakl) as a message channel.
@@ -15,6 +16,11 @@ import { cursorStart, isoOrNow, sameText, sendFailure, threadId } from "../marke
  * - Mirakl documents M10/M11 as "synchronous only" (called when an inbox is
  *   displayed). Background polling therefore stays off unless the operator
  *   explicitly allowed it; see `backgroundSyncAllowed` on the connection.
+ *
+ * - OR11 GET /api/orders?order_ids=… (read only): the order as the marketplace
+ *   shows it, for "Beim Marktplatz nachsehen" in the case.
+ * The same adapter serves every Mirakl marketplace (Shop Apotheke, Douglas,
+ * MediaMarkt/Saturn, Conrad, Decathlon); only the instance address differs.
  *
  * Not yet verified with a real account: the operator instance URL, key scopes
  * and the order id format of MMP_ORDER entities in weclapp.
@@ -210,6 +216,37 @@ export class MiraklInboxChannel implements MessageChannel {
     return { id: attachmentId, name, contentType, size: file.data.length, data: file.data };
   }
 
+  /** OR11: one order by its Mirakl order id; null when this shop has no such order. */
+  async lookupOrder(orderId: string): Promise<MarketplaceOrderView | null> {
+    const res = await this.#call("GET", "/api/orders", { order_ids: orderId, max: 1 });
+    const order = (Array.isArray(res?.orders) ? (res!.orders as Json[]) : []).find((o) => String(o.order_id) === orderId);
+    if (!order) return null;
+    const currency = typeof order.currency_iso_code === "string" ? order.currency_iso_code : undefined;
+    const lines = Array.isArray(order.order_lines) ? (order.order_lines as Json[]) : [];
+    return {
+      platform: "mirakl",
+      orderId,
+      status: typeof order.order_state === "string" ? order.order_state : undefined,
+      statusLabel: statusLabel(MIRAKL_STATE_DE, order.order_state),
+      createdAt: typeof order.created_date === "string" ? order.created_date : undefined,
+      lines: lines.map((l) => ({
+        title: typeof l.product_title === "string" ? l.product_title : typeof l.offer_sku === "string" ? l.offer_sku : "Artikel",
+        sku: typeof l.offer_sku === "string" ? l.offer_sku : undefined,
+        quantity: typeof l.quantity === "number" ? l.quantity : undefined,
+        status: typeof l.order_line_state === "string" ? l.order_line_state : undefined,
+        statusLabel: statusLabel(MIRAKL_STATE_DE, l.order_line_state),
+      })),
+      tracking: typeof order.shipping_tracking === "string" && order.shipping_tracking
+        ? [{ number: order.shipping_tracking, carrier: typeof order.shipping_carrier_code === "string" ? order.shipping_carrier_code : undefined, url: httpsUrl(order.shipping_tracking_url) }]
+        : [],
+      refunds: lines.flatMap((l) => (Array.isArray(l.refunds) ? (l.refunds as Json[]) : []).map((r) => {
+        const state = typeof r.refund_state === "string" ? r.refund_state : typeof r.state === "string" ? r.state : undefined;
+        return { amount: typeof r.amount === "number" ? r.amount : undefined, currency, state, stateLabel: statusLabel(MIRAKL_STATE_DE, state), date: typeof r.created_date === "string" ? r.created_date : undefined };
+      })),
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
   async checkAccess(): Promise<{ ok: boolean; detail: string }> {
     try {
       await this.#call("GET", "/api/inbox/threads", { limit: 1 });
@@ -217,6 +254,16 @@ export class MiraklInboxChannel implements MessageChannel {
     } catch (error) {
       return { ok: false, detail: error instanceof HttpError ? error.message : (error as Error).message };
     }
+  }
+}
+
+/** Only https links are shown in the case. */
+export function httpsUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    return new URL(value).protocol === "https:" ? value : undefined;
+  } catch {
+    return undefined;
   }
 }
 

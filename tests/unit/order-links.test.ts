@@ -21,3 +21,9 @@ test("the weclapp order page is built from the tenant address, no marketplace li
   assert.deepEqual(links.map((l) => l.href), ["https://firma.weclapp.com/app/sales-order/108472266"]);
   assert.deepEqual(orderLinks({ order: { id: "so-shop-1" }, platforms: [], erpBaseUrl: "https://firma.weclapp.com/webapp/api/v2" }), [], "only numeric weclapp ids");
 });
+
+test("other Mirakl marketplaces link into their own back office, named after the operator", () => {
+  const order = { id: "1", orderNumberAtCustomer: "DG-9-A" };
+  assert.deepEqual(orderLinks({ order, platforms: ["douglas"], miraklBaseUrl: "https://douglas.mirakl.net" }), [{ label: "Bestellung bei Douglas", href: "https://douglas.mirakl.net/mmp/shop/order/DG-9-A" }]);
+  assert.deepEqual(orderLinks({ order, platforms: ["otto"], miraklBaseUrl: "https://douglas.mirakl.net" }), [], "no Mirakl link for a non-Mirakl case");
+});

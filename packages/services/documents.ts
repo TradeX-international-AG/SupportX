@@ -15,7 +15,7 @@ export const REPLY_FILES: Record<ChannelKind, { supported: boolean; note: string
   // Amazon, DocMorris, Shopify and other mail answers go out as a mail reply with the file attached.
   microsoft_graph: { supported: true, note: "Die Datei geht als Anhang der Antwortmail raus. Amazon leitet PDF-, JPG- und PNG-Anhänge an den Käufer weiter." },
   kaufland_tickets: { supported: true, note: "Die Datei wird an die Ticket-Nachricht bei Kaufland angehängt." },
-  mirakl_inbox: { supported: true, note: "Die Datei wird an die Nachricht bei Shop Apotheke angehängt." },
+  mirakl_inbox: { supported: true, note: "Die Datei wird an die Nachricht im Mirakl-Marktplatz (z. B. Shop Apotheke, Douglas) angehängt." },
   ebay_messages: { supported: false, note: "eBay nimmt in Nachrichten keine Dateien an. Ausweg: die Datei hier herunterladen und im eBay-Verkäuferportal bei der Bestellung bzw. Nachricht selbst hochladen, oder die wichtigsten Punkte in die Antwort schreiben." },
 };
 

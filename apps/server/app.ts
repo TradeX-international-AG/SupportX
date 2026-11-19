@@ -46,6 +46,7 @@ import { attachUploadedFile, deleteDocument, getDocument, listDocuments, attachT
 import { attachCaseInvoices, draftInvoiceReply, fetchCaseInvoices } from "../../packages/services/invoices.ts";
 import { deleteLogo, getLogo, logoVersion, previewDesign, resetDesign, saveDesign, saveLogo, workspaceTheme } from "../../packages/services/design.ts";
 import { writeDesignMd, type WorkspaceTheme } from "../../packages/core/design-md.ts";
+import { caseMarketplaceOrderInfo, checkOttoConnection, deleteOttoConnection, getOttoSettings, lookupCaseMarketplaceOrder, saveOttoConnection } from "../../packages/services/marketplace-orders.ts";
 import { checkDhlConnection, deleteDhlConnection, getDhlSettings, saveDhlConnection, trackCaseParcels } from "../../packages/services/dhl-tracking.ts";
 import { createPhoneToken, deletePhoneConnection, getPhoneSettings, handlePhoneWebhook, phoneInvoiceRequest, phoneOrderStatus, savePhoneSettings, workspaceForToolToken } from "../../packages/services/phone.ts";
 import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection, setAmazonRefundsEnabled } from "../../packages/services/amazon-listings.ts";
@@ -326,6 +327,12 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     const body = parse(z.object({ force: z.boolean().optional() }), req.body ?? {});
     return trackCaseParcels(ctx, await actor(req), (req.params as { id: string }).id, body);
   });
+  // "Beim Marktplatz nachsehen": GET only says what can be asked; POST reads the order live (click only).
+  app.get("/api/w/:ws/cases/:id/marketplace-order", async (req) => caseMarketplaceOrderInfo(ctx, await actor(req), (req.params as { id: string }).id));
+  app.post("/api/w/:ws/cases/:id/marketplace-order", async (req) => {
+    const body = parse(z.object({ orderId: z.string().max(60).optional() }), req.body ?? {});
+    return lookupCaseMarketplaceOrder(ctx, await actor(req), (req.params as { id: string }).id, body);
+  });
   // Amazon refund from the case: read the order first, send only with the dialog's confirmation and total.
   const amazonOrderId = z.string().min(19).max(19);
   app.post("/api/w/:ws/cases/:id/amazon-refund/lookup", async (req) => {
@@ -552,6 +559,17 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     return { ok: true };
   });
   app.post("/api/w/:ws/dhl-tracking/check", async (req) => checkDhlConnection(ctx, await actor(req)));
+  // OTTO Market API (owner), read only for the order status in the case. The secret is never returned.
+  app.get("/api/w/:ws/otto-api", async (req) => getOttoSettings(ctx, await actor(req)));
+  app.put("/api/w/:ws/otto-api", async (req) => {
+    await saveOttoConnection(ctx, await actor(req), parse(z.object({ clientId: z.string().max(200), clientSecret: z.string().max(500), sandbox: z.boolean().optional(), baseUrl: z.string().max(300).optional() }), req.body));
+    return { ok: true };
+  });
+  app.delete("/api/w/:ws/otto-api", async (req) => {
+    await deleteOttoConnection(ctx, await actor(req));
+    return { ok: true };
+  });
+  app.post("/api/w/:ws/otto-api/check", async (req) => checkOttoConnection(ctx, await actor(req)));
   app.put("/api/w/:ws/erp", async (req) => {
     const body = parse(z.object({ baseUrl: z.string().max(300), apiToken: z.string().max(500).optional(), searchFields: z.array(z.string()).max(5).optional() }), req.body);
     return { id: await upsertWeclappConnection(ctx, await actor(req), body) };
@@ -583,7 +601,7 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
   });
   app.post("/api/w/:ws/connections/mirakl", async (req) => {
     const body = parse(
-      z.object({ displayName: z.string().max(120).default("Shop Apotheke"), baseUrl: z.string().max(300), apiKey: z.string().max(500), shopId: z.string().max(20).optional(), defaultMerchantAccountId: accountField, initialSyncDays: z.number().int().min(1).max(90).optional() }),
+      z.object({ displayName: z.string().max(120).default(""), platform: z.string().max(40).optional(), baseUrl: z.string().max(300), apiKey: z.string().max(500), shopId: z.string().max(20).optional(), defaultMerchantAccountId: accountField, initialSyncDays: z.number().int().min(1).max(90).optional() }),
       req.body,
     );
     return { id: await createMiraklConnection(ctx, await actor(req), body) };

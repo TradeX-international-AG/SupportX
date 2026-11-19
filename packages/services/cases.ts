@@ -224,8 +224,11 @@ export async function getCase(ctx: AppContext, actor: Actor, conversationId: str
   const linkTargets = await one<{ erp_base_url: string | null; mirakl_base_url: string | null }>(
     ctx.db,
     `SELECT (SELECT base_url FROM erp_connections WHERE workspace_id = $1) AS erp_base_url,
-            (SELECT config->>'baseUrl' FROM channel_connections WHERE workspace_id = $1 AND kind = 'mirakl_inbox' ORDER BY created_at LIMIT 1) AS mirakl_base_url`,
-    [ws],
+            (SELECT cc.config->>'baseUrl' FROM channel_connections cc
+              WHERE cc.workspace_id = $1 AND cc.kind = 'mirakl_inbox'
+                AND cc.default_source_platform = (SELECT source_platform FROM conversations WHERE workspace_id = $1 AND id = $2)
+              ORDER BY cc.created_at LIMIT 1) AS mirakl_base_url`,
+    [ws, conversationId],
   );
   const link = orderLink as { status: string; snapshot: OrderRecord | null } | null;
   const latestInbound = [...(messages as Array<{ direction: string; kind: string; body_text: string }>)].reverse().find((m) => m.direction === "inbound" && m.kind === "customer");

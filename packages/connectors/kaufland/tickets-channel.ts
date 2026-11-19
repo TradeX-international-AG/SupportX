@@ -2,6 +2,7 @@ import type { ConnectorCapabilities, IngressMessage, MessageChannel, ReconcileOu
 import { assertAllowedEndpoint, HttpError, requestJson } from "../http.ts";
 import { cursorStart, isoOrNow, sameText, sendFailure, threadId } from "../marketplace-common.ts";
 import { kauflandHeaders } from "./signing.ts";
+import { KAUFLAND_STATUS_DE, statusLabel, summariseLines, type MarketplaceOrderView } from "../../core/marketplace-order.ts";
 
 /**
  * Kaufland Seller API v2 tickets as a message channel.
@@ -15,6 +16,9 @@ import { kauflandHeaders } from "./signing.ts";
  * - POST /tickets/{id_ticket}/messages {text, interim_notice}. interim_notice=true
  *   keeps the ticket open for the seller; the text is still customer-visible.
  * - No ticket/message push notification is documented: bounded polling only.
+ * - GET /orders/{id_order} (read only): the order with its order units, for
+ *   "Beim Marktplatz nachsehen" in the case. Kaufland keeps the status per order
+ *   unit (one unit = one piece).
  *
  * Not yet verified with a real account: the exact `author.role` values, whether
  * the buyer's e-mail is exposed, and the format of `id_order` in weclapp.
@@ -202,6 +206,46 @@ export class KauflandTicketsChannel implements MessageChannel {
     } catch (error) {
       return { state: "unknown", error: (error as Error).message };
     }
+  }
+
+  /** The order and its order units as Kaufland shows them; null when this account has no such order. */
+  async lookupOrder(orderId: string): Promise<MarketplaceOrderView | null> {
+    let res: Json | null;
+    try {
+      res = await this.#call("GET", `/orders/${encodeURIComponent(orderId)}`);
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 404) return null;
+      throw error;
+    }
+    const order = ((res?.data ?? res) as Json | null) ?? null;
+    if (!order || order.id_order === undefined) return null;
+    const units = Array.isArray(order.order_units) ? (order.order_units as Json[]) : [];
+    // One unit per piece: group equal article + status into one line.
+    const grouped = new Map<string, { title: string; status?: string; quantity: number }>();
+    for (const u of units) {
+      const item = (u.item ?? u.product ?? {}) as Json;
+      const title = typeof item.title === "string" ? item.title : typeof u.title === "string" ? u.title : "Artikel";
+      const status = typeof u.status === "string" ? u.status : undefined;
+      const key = `${title}\u0000${status ?? ""}`;
+      const g = grouped.get(key) ?? { title, status, quantity: 0 };
+      g.quantity += 1;
+      grouped.set(key, g);
+    }
+    const lines = [...grouped.values()].map((g) => ({ title: g.title, quantity: g.quantity, status: g.status, statusLabel: statusLabel(KAUFLAND_STATUS_DE, g.status) }));
+    const tracking = units.flatMap((u) => {
+      const numbers = typeof u.tracking_numbers === "string" ? u.tracking_numbers.split(",").map((n) => n.trim()).filter(Boolean) : [];
+      return numbers.map((number) => ({ number, carrier: typeof u.carrier_code === "string" ? u.carrier_code : undefined }));
+    });
+    return {
+      platform: "kaufland",
+      orderId,
+      statusLabel: summariseLines(lines),
+      createdAt: typeof order.ts_created_iso === "string" ? order.ts_created_iso : undefined,
+      lines,
+      tracking: [...new Map(tracking.map((t) => [t.number, t])).values()],
+      refunds: [],
+      fetchedAt: new Date().toISOString(),
+    };
   }
 
   async checkAccess(): Promise<{ ok: boolean; detail: string }> {

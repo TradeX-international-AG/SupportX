@@ -4,13 +4,19 @@
  * hours are the operator's choice per workspace (0 = no deadline). Pure, shared by
  * API and UI.
  */
-export const DEADLINE_PLATFORMS = ["amazon", "ebay", "kaufland", "shop_apotheke", "docmorris", "shopify", "email"] as const;
+export const DEADLINE_PLATFORMS = ["amazon", "ebay", "kaufland", "otto", "shop_apotheke", "douglas", "mediamarkt_saturn", "conrad", "decathlon", "docmorris", "shopify", "email"] as const;
 
 export const DEFAULT_REPLY_DEADLINES: Readonly<Record<(typeof DEADLINE_PLATFORMS)[number], number>> = {
   amazon: 24,
   ebay: 48,
   kaufland: 48,
+  // OTTO expects partners to answer customer contacts within 24 hours.
+  otto: 24,
   shop_apotheke: 48,
+  douglas: 48,
+  mediamarkt_saturn: 48,
+  conrad: 48,
+  decathlon: 48,
   docmorris: 48,
   shopify: 48,
   email: 48,

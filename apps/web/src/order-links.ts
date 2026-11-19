@@ -3,6 +3,7 @@
  * marketplace where it was placed. Pure, so it can be unit-tested. A link is
  * only built when its address is known for sure; otherwise there is none.
  */
+import { MIRAKL_PLATFORMS, PLATFORM_NAMES } from "../../../packages/core/marketplaces.ts";
 
 export interface OrderLink {
   label: string;
@@ -17,7 +18,7 @@ export interface OrderLinkInput {
   platforms: ReadonlyArray<string | null | undefined>;
   /** weclapp API address of this installation, e.g. https://firma.weclapp.com/webapp/api/v2 */
   erpBaseUrl?: string | null;
-  /** Mirakl back office of Shop Apotheke, if connected. */
+  /** Mirakl back office of the case's marketplace (Shop Apotheke, Douglas, …), if connected. */
   miraklBaseUrl?: string | null;
 }
 
@@ -58,9 +59,11 @@ export function orderLinks(input: OrderLinkInput): OrderLink[] {
     links.push({ label: "Bestellung erstatten", href: `https://sellercentral.amazon.de/gp/orders-v2/refund?orderID=${amazon}`, kind: "refund" });
   }
   else if (ebay) links.push({ label: "Bestellung bei eBay", href: `https://www.ebay.de/sh/ord/details?orderid=${ebay}` });
-  else if (platforms.has("shop_apotheke") && order.orderNumberAtCustomer) {
-    const mirakl = origin(input.miraklBaseUrl);
-    if (mirakl) links.push({ label: "Bestellung bei Shop Apotheke", href: `${mirakl}/mmp/shop/order/${encodeURIComponent(order.orderNumberAtCustomer)}` });
+  else if (order.orderNumberAtCustomer) {
+    // Mirakl marketplaces (Shop Apotheke, Douglas, …): the back office of the operator the case came from.
+    const market = MIRAKL_PLATFORMS.find((p) => platforms.has(p));
+    const mirakl = market ? origin(input.miraklBaseUrl) : null;
+    if (market && mirakl) links.push({ label: `Bestellung bei ${PLATFORM_NAMES[market]}`, href: `${mirakl}/mmp/shop/order/${encodeURIComponent(order.orderNumberAtCustomer)}` });
   }
   return links;
 }

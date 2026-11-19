@@ -27,7 +27,7 @@ export function sendableInvoices(order: OrderRecord): InvoiceFact[] {
 const ROUTE_LABEL: Record<ChannelKind, string> = {
   microsoft_graph: "als Antwort auf die Mail des Kunden (bei Amazon über die Amazon-Käufernachricht)",
   kaufland_tickets: "im Kaufland-Ticket",
-  mirakl_inbox: "in der Nachricht bei Shop Apotheke",
+  mirakl_inbox: "in der Nachricht im Marktplatz (Mirakl)",
   ebay_messages: "als eBay-Nachricht",
 };
 

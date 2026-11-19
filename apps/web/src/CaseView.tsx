@@ -10,6 +10,7 @@ import { deadlineState } from "../../../packages/core/deadline.ts";
 import { formatKg, weightChecks, WEIGHT_SOURCE_NOTE } from "../../../packages/core/weight-check.ts";
 import { buildTimeline } from "../../../packages/core/timeline.ts";
 import { ParcelTrackingCard } from "./DhlTracking.tsx";
+import { MarketplaceOrderCard } from "./MarketplaceOrder.tsx";
 import { AmazonOfferCard, LISTING_STATE, listingActionText, type ListingAction } from "./AmazonOffer.tsx";
 import { AmazonRefundCard, type MarketplaceRefund } from "./AmazonRefund.tsx";
 import { CreditNoteCard, type CaseCreditNote } from "./CreditNote.tsx";
@@ -420,6 +421,8 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
           </section>
 
           <ParcelTrackingCard base={base} caseId={caseId} canEdit={canEdit} refreshKey={`${data.orderLink?.external_order_id ?? ""}|${data.orderLink?.retrieved_at ?? ""}|${(c.order_references ?? []).length}`} />
+
+          <MarketplaceOrderCard base={base} caseId={caseId} platform={c.source_platform} refreshKey={`${data.orderLink?.external_order_id ?? ""}|${(c.order_references ?? []).length}`} />
 
           {data.amazonListings && (c.source_platform === "amazon" || (data.listingActions?.length ?? 0) > 0) && (
             <AmazonOfferCard

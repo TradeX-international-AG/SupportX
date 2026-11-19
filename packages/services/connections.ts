@@ -9,6 +9,7 @@ import { KauflandTicketsChannel } from "../connectors/kaufland/tickets-channel.t
 import { GraphMailChannel } from "../connectors/microsoft/graph-mail.ts";
 import { isOfficialMiraklHost, MiraklInboxChannel } from "../connectors/mirakl/inbox-channel.ts";
 import { validateWeclappBaseUrl, WeclappOrderProvider } from "../connectors/weclapp/adapter.ts";
+import { ALL_PLATFORMS, isMiraklPlatform, PLATFORM_NAMES } from "../core/marketplaces.ts";
 import { operatorEbayApp } from "../storage/config.ts";
 import { many, one, withTx, type Queryable } from "../storage/db.ts";
 import { audit } from "./audit.ts";
@@ -245,7 +246,7 @@ export async function loadCategoryRules(q: Queryable, workspaceId: string): Prom
 // ---------------------------------------------------------------------------
 // Setup (owner only). Secrets are written once and never returned.
 
-const PLATFORMS: ReadonlyArray<SourcePlatform> = ["email", "amazon", "ebay", "kaufland", "shop_apotheke", "docmorris", "shopify", "phone"];
+const PLATFORMS: ReadonlyArray<SourcePlatform> = ALL_PLATFORMS;
 
 export function assertPlatform(value: string): SourcePlatform {
   if (!PLATFORMS.includes(value as SourcePlatform)) throw new ServiceError(400, "INVALID", `Unbekannte Plattform: ${value}`);
@@ -412,10 +413,13 @@ export async function createKauflandConnection(
 export async function createMiraklConnection(
   ctx: AppContext,
   actor: Actor,
-  input: { displayName: string; baseUrl: string; apiKey: string; shopId?: string; defaultMerchantAccountId?: string | null; initialSyncDays?: number },
+  input: { displayName: string; baseUrl: string; apiKey: string; shopId?: string; platform?: string; defaultMerchantAccountId?: string | null; initialSyncDays?: number },
 ): Promise<string> {
   requireRole(actor, ["owner"]);
   required({ baseUrl: input.baseUrl, apiKey: input.apiKey });
+  // Which Mirakl marketplace (Shop Apotheke, Douglas, …): same API, own platform in SupportX.
+  const platform = input.platform ?? "shop_apotheke";
+  if (!isMiraklPlatform(platform)) throw new ServiceError(400, "INVALID", `Kein Mirakl-Marktplatz: ${platform}`);
   const config: MiraklConnectionSettings = {
     baseUrl: input.baseUrl.trim(),
     ...(input.shopId?.trim() ? { shopId: input.shopId.trim() } : {}),
@@ -425,7 +429,7 @@ export async function createMiraklConnection(
   };
   validateOffline(ctx, "mirakl_inbox", config, input.apiKey.trim());
   return withTx(ctx.db, (tx) =>
-    insertChannel(tx, actor, { kind: "mirakl_inbox", displayName: input.displayName.trim() || "Shop Apotheke", config, secretPurpose: "mirakl_api_key", secret: input.apiKey.trim(), platform: "shop_apotheke", defaultMerchantAccountId: input.defaultMerchantAccountId }, ctx),
+    insertChannel(tx, actor, { kind: "mirakl_inbox", displayName: input.displayName.trim() || PLATFORM_NAMES[platform], config, secretPurpose: "mirakl_api_key", secret: input.apiKey.trim(), platform, defaultMerchantAccountId: input.defaultMerchantAccountId }, ctx),
   );
 }
 

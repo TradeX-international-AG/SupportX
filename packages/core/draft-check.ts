@@ -1,3 +1,4 @@
+import { MESSAGING_RULE_PLATFORMS, PLATFORM_NAMES } from "./marketplaces.ts";
 import type { AllowedFact, OrderRecord } from "./contracts.ts";
 import { hasCarrierDelivered, hasCarrierDispatch } from "./carrier-tracking.ts";
 import { hasDeliveredEvidence, hasDispatchEvidence } from "./facts.ts";
@@ -39,7 +40,7 @@ export interface DraftCheckInput {
 }
 
 /** Platforms whose buyer messaging forbids contact details and advertising. */
-const MARKETPLACES: Readonly<Record<string, string>> = { amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris" };
+const MARKETPLACES: Readonly<Record<string, string>> = Object.fromEntries(MESSAGING_RULE_PLATFORMS.map((p) => [p, PLATFORM_NAMES[p]]));
 const EMAIL_IN_TEXT = /[\w.+-]+@[\w-]+(\.[\w-]+)*\.[a-z]{2,}/i;
 // Only numbers that are clearly phone numbers: labelled, or in international form. Order and parcel numbers stay out.
 const PHONE_IN_TEXT = /\b(?:tel|telefon(?:nummer)?|phone|fon|mobil|handy|whatsapp|hotline)\.?\s*:?\s*[+(\d]|\+\d{2}[\s\d/()-]{6,}\d/i;

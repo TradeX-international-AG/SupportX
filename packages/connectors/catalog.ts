@@ -6,7 +6,7 @@ import type { CapabilityState, SourcePlatform } from "../core/contracts.ts";
  * that an account was tested. Research date: 2026-10-21 (docs/CONNECTORS.md).
  */
 export interface ConnectorDescriptor {
-  platform: SourcePlatform | "microsoft" | "weclapp" | "dhl";
+  platform: SourcePlatform | "microsoft" | "weclapp" | "dhl" | "temu";
   label: string;
   transport: string;
   implementation: "implemented" | "via_microsoft_mail" | "planned";
@@ -113,7 +113,7 @@ export const CONNECTOR_CATALOG: ReadonlyArray<ConnectorDescriptor> = [
   {
     platform: "kaufland",
     label: "Kaufland (Seller API Tickets)",
-    transport: "HMAC-signiert; GET /tickets/messages, GET /tickets/{id}, POST /tickets/{id}/messages, Abruf alle 5 min",
+    transport: "HMAC-signiert; GET /tickets/messages, GET /tickets/{id}, POST /tickets/{id}/messages, Abruf alle 5 min; Bestellstatus lesend über GET /orders/{id_order} per Klick im Fall",
     implementation: "implemented",
     receive: "configured",
     reply: "configured",
@@ -126,18 +126,47 @@ export const CONNECTOR_CATALOG: ReadonlyArray<ConnectorDescriptor> = [
     notes: "Antworten werden mit interim_notice=false gesendet (normale, kundensichtbare Antwort). Kein Ticket-Push dokumentiert.",
   },
   {
+    platform: "otto",
+    label: "OTTO Market (Mail + Orders API v4)",
+    transport: "Kundenanfragen per E-Mail über den Microsoft-Anschluss; Bestellstatus lesend über GET /v4/orders/{orderNumber} (eigene App, Client Credentials, Scope orders), nur per Klick im Fall",
+    implementation: "via_microsoft_mail",
+    receive: "configured",
+    reply: "documented",
+    accountTestNeeded: [
+      "Kommen OTTO-Kundenanfragen als Mail im Postfach an, und mit welchem Absender/Reply-To?",
+      "Erreicht eine Antwort auf diese Mail den Kunden (Rückweg einmal kontrolliert prüfen)?",
+      "Eigene App in OTTO Partner Connect mit Scope „orders“; liefert das Token den Scope?",
+      "Feldnamen von Artikeltitel und Sendungsnummer in positionItems",
+    ],
+    notes: "OTTO bietet keine API für Kundennachrichten. Die OTTO-Schnittstelle zeigt nur den Bestellstatus, sie geht nicht in den Entwurf. Geprüft nur mit einem lokalen Test-Double.",
+  },
+  {
     platform: "shop_apotheke",
-    label: "Shop Apotheke (Mirakl M10/M11/M12)",
+    label: "Mirakl-Marktplätze: Shop Apotheke, Douglas, MediaMarkt/Saturn, Conrad, Decathlon (M10–M13, OR11)",
     transport: "Mirakl-Posteingang der Betreiber-Instanz; Abruf bei offenem Posteingang (höchstens alle 10 min) und per Klick, Hintergrundabruf nur mit Freigabe",
     implementation: "implemented",
     receive: "configured",
     reply: "configured",
     accountTestNeeded: [
-      "Adresse der Shop-Apotheke-Mirakl-Instanz und Nachrichtenrechte des API-Schlüssels",
+      "Adresse der Mirakl-Instanz je Marktplatz und Nachrichtenrechte des API-Schlüssels",
+      "Liefert OR11 (GET /api/orders) mit demselben Schlüssel die Bestellung (Bestellstatus im Fall)?",
       "Freigabe des Betreibers für Hintergrundabruf (Mirakl: synchron beim Öffnen des Posteingangs)",
       "Format der Bestellnummer (MMP_ORDER) in weclapp",
       "Kontrollierte Testantwort an Kunde bzw. Betreiber",
     ],
-    notes: "Empfänger kommt aus dem Vorgang selbst (Kunde oder Betreiber), nie aus dem Entwurf.",
+    notes: "Ein Adapter für alle Mirakl-Betreiber, je Betreiber eine eigene Karte. Empfänger kommt aus dem Vorgang selbst (Kunde oder Betreiber), nie aus dem Entwurf. Nur Shop Apotheke war bisher im Gespräch; Douglas, MediaMarkt/Saturn, Conrad und Decathlon sind nur mit dem Test-Double geprüft.",
+  },
+  {
+    platform: "temu",
+    label: "Temu",
+    transport: "Kundennachrichten nur im Temu Seller Center (Chat); keine öffentliche Nachrichten-API für EU-Verkäufer gefunden",
+    implementation: "planned",
+    receive: "not_implemented",
+    reply: "not_implemented",
+    accountTestNeeded: [
+      "Partner-App bei Temu (partner-eu.temu.com) beantragen, siehe docs/MARKTPLATZ-APPS.md",
+      "Klären, ob Temu Käufernachrichten über die Open API freigibt",
+    ],
+    notes: "Nicht gebaut: ohne freigegebene App und bestätigte Nachrichten-Schnittstelle würde SupportX Endpunkte raten.",
   },
 ];

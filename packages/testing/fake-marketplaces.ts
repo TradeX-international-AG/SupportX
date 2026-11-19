@@ -68,6 +68,8 @@ export interface FakeKaufland {
   tickets: FakeKauflandTicket[];
   messages: FakeKauflandMessage[];
   posted: Array<{ ticketId: string; text: string; interim_notice: unknown; files: Array<{ filename: string; mime_type: string; data: string }> }>;
+  /** GET /orders/{id_order}: synthetic orders with their order units. */
+  orders: Map<string, { ts_created_iso: string; order_units: Array<{ id_order_unit: number; status: string; item: { title: string }; tracking_numbers?: string; carrier_code?: string }> }>;
   requests: string[];
   addTicket(t: Omit<FakeKauflandTicket, "storefront" | "topic"> & Partial<Pick<FakeKauflandTicket, "storefront" | "topic">>): void;
   addMessage(ticketId: string, role: string, text: string, at?: Date): FakeKauflandMessage;
@@ -79,6 +81,7 @@ export async function startFakeKaufland(opts: { clientKey: string; secretKey: st
   const tickets: FakeKauflandTicket[] = [];
   const messages: FakeKauflandMessage[] = [];
   const posted: FakeKaufland["posted"] = [];
+  const orders: FakeKaufland["orders"] = new Map();
   const requests: string[] = [];
   let nextId = 1000;
   let fault: SendFault = "none";
@@ -110,6 +113,12 @@ export async function startFakeKaufland(opts: { clientKey: string; secretKey: st
       // Same rule as the real API (seen live 2026-11-12).
       if (limit > 30) return json(res, 400, { message: "Validation Failed", errors: [{ property: "limit", message: "max 30" }] });
       return json(res, 200, { data: all.slice(offset, offset + limit), pagination: { offset, limit, total: all.length } });
+    }
+    const orderMatch = /^\/orders\/([^/]+)$/.exec(path);
+    if (req.method === "GET" && orderMatch) {
+      const id = decodeURIComponent(orderMatch[1]!);
+      const o = orders.get(id);
+      return o ? json(res, 200, { data: { id_order: id, ...o } }) : json(res, 404, { message: "not found" });
     }
     const ticketMatch = /^\/tickets\/([^/]+)$/.exec(path);
     if (req.method === "GET" && ticketMatch) {
@@ -145,6 +154,7 @@ export async function startFakeKaufland(opts: { clientKey: string; secretKey: st
     tickets,
     messages,
     posted,
+    orders,
     requests,
     addTicket: (t) => tickets.push({ storefront: "de", topic: "product_not_received", ...t }),
     addMessage: add,
@@ -284,6 +294,8 @@ export interface FakeMirakl {
   baseUrl: string;
   threads: FakeMiraklThread[];
   replies: Array<{ threadId: string; body: string; to: Array<{ type: string; id?: string }>; files: Array<{ name: string; type: string; size: number }> }>;
+  /** OR11 GET /api/orders?order_ids=…: synthetic orders as documented. */
+  orders: Array<Record<string, unknown> & { order_id: string }>;
   requests: string[];
   addThread(input: { id: string; topic: string; orderId: string; customerId: string; customerName: string; text: string; from?: "CUSTOMER_USER" | "OPERATOR_USER"; at?: Date; files?: Array<{ id: string; name: string; data: Buffer }> }): void;
   setSendFault(fault: SendFault): void;
@@ -294,6 +306,7 @@ export async function startFakeMirakl(opts: { apiKey: string; hangMs?: number })
   const threads: FakeMiraklThread[] = [];
   const files = new Map<string, { name: string; data: Buffer }>();
   const replies: FakeMirakl["replies"] = [];
+  const orders: FakeMirakl["orders"] = [];
   const requests: string[] = [];
   let seq = 1;
   let fault: SendFault = "none";
@@ -307,6 +320,11 @@ export async function startFakeMirakl(opts: { apiKey: string; hangMs?: number })
       const withMessages = url.searchParams.get("with_messages") === "true";
       const data = threads.filter((t) => new Date(t.date_updated).getTime() >= since).map((t) => ({ ...t, messages: withMessages ? t.messages.slice(-100) : undefined }));
       return json(res, 200, { data });
+    }
+    if (req.method === "GET" && url.pathname === "/api/orders") {
+      const ids = (url.searchParams.get("order_ids") ?? "").split(",").filter(Boolean);
+      const found = orders.filter((o) => ids.includes(o.order_id));
+      return json(res, 200, { orders: found, total_count: found.length });
     }
     const download = /^\/api\/inbox\/threads\/([^/]+)\/download$/.exec(url.pathname);
     if (req.method === "GET" && download) {
@@ -344,6 +362,7 @@ export async function startFakeMirakl(opts: { apiKey: string; hangMs?: number })
     baseUrl,
     threads,
     replies,
+    orders,
     requests,
     addThread: (input) => {
       for (const f of input.files ?? []) files.set(f.id, { name: f.name, data: f.data });
@@ -360,6 +379,45 @@ export async function startFakeMirakl(opts: { apiKey: string; hangMs?: number })
     setSendFault: (f) => (fault = f),
     close: () => close(server),
   };
+}
+
+// ---------------------------------------------------------------------------
+// OTTO Market orders (client credentials + GET /v4/orders/{orderNumber})
+
+export interface FakeOtto {
+  baseUrl: string;
+  orders: Map<string, Record<string, unknown>>;
+  requests: string[];
+  tokenRequests: Array<Record<string, string>>;
+  close(): Promise<void>;
+}
+
+export async function startFakeOtto(opts: { clientId: string; clientSecret: string }): Promise<FakeOtto> {
+  const orders: FakeOtto["orders"] = new Map();
+  const requests: string[] = [];
+  const tokenRequests: FakeOtto["tokenRequests"] = [];
+  const token = "otto-token-1";
+  const server = createServer(async (req, res) => {
+    const body = (await readBody(req)).toString("utf8");
+    const url = new URL(req.url ?? "/", "http://x");
+    requests.push(`${req.method} ${url.pathname}${url.search}`);
+    if (req.method === "POST" && url.pathname === "/v1/token") {
+      const form = Object.fromEntries(new URLSearchParams(body));
+      tokenRequests.push(form);
+      if (form.grant_type !== "client_credentials" || form.client_id !== opts.clientId || form.client_secret !== opts.clientSecret) return json(res, 401, { error: "invalid_client" });
+      return json(res, 200, { access_token: token, token_type: "Bearer", expires_in: 1800, scope: form.scope });
+    }
+    if (req.headers.authorization !== `Bearer ${token}`) return json(res, 401, { message: "Unauthorized" });
+    if (req.method === "GET" && url.pathname === "/v4/orders") return json(res, 200, { resources: [], links: [] });
+    const one = /^\/v4\/orders\/([^/]+)$/.exec(url.pathname);
+    if (req.method === "GET" && one) {
+      const o = orders.get(decodeURIComponent(one[1]!));
+      return o ? json(res, 200, o) : json(res, 404, { errors: [{ title: "not found" }] });
+    }
+    return json(res, 404, { message: "unknown endpoint" });
+  });
+  const baseUrl = await listen(server);
+  return { baseUrl, orders, requests, tokenRequests, close: () => close(server) };
 }
 
 /** Signs a notification like eBay does (ECDSA, SHA1); returns the x-ebay-signature header and the matching public key. */

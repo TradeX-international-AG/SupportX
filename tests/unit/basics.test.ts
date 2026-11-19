@@ -53,7 +53,8 @@ describe("deadlineState", () => {
     assert.deepEqual(normalizeDeadlines({ amazon: "12", ebay: "" }), { amazon: 12, ebay: 0 });
     assert.equal(normalizeDeadlines({ amazon: 200 }), null);
     assert.equal(normalizeDeadlines({ amazon: 1.5 }), null);
-    assert.equal(normalizeDeadlines({ otto: 24 }), null);
+    assert.equal(normalizeDeadlines({ temu: 24 }), null);
+    assert.deepEqual(normalizeDeadlines({ otto: 24, douglas: 48 }), { otto: 24, douglas: 48 });
     assert.equal(normalizeDeadlines([24]), null);
   });
 });

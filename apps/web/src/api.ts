@@ -1,3 +1,4 @@
+import { PLATFORM_NAMES } from "../../../packages/core/marketplaces.ts";
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -28,9 +29,7 @@ export const fmtDate = (value: unknown): string => {
   return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
 };
 
-export const PLATFORM_LABEL: Record<string, string> = {
-  email: "E-Mail", amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris", shopify: "Shopify", phone: "Telefon",
-};
+export const PLATFORM_LABEL: Record<string, string> = PLATFORM_NAMES;
 
 export const MATCH_LABEL: Record<string, { label: string; tone: "ok" | "warn" | "bad" | "muted" }> = {
   pending: { label: "wird geprüft", tone: "muted" },

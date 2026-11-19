@@ -76,9 +76,20 @@ Implementation note (2026-10-21): the Graph adapter reads via delta, fetches sin
 | MIR-1 | [M11: List all threads](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/messages/m11) | Thread list, seek pagination, message inclusion limit, key scopes and synchronous-use guidance. |
 | MIR-2 | [M10: Retrieve a thread](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/messages/m10) | Thread detail and synchronous-use guidance. |
 | MIR-3 | [M12: Reply to a thread](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/messages/m12) | Documented thread reply operation. |
+| MIR-5 | [OR11: List orders](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/orders/or11) | `GET /api/orders?order_ids=`: `order_state`, `order_lines[]` with `order_line_state`, `product_title`, `quantity`, `refunds[]` (`amount`, `refund_state`), `shipping_tracking`, `shipping_carrier_code`, `shipping_tracking_url` (field list as used by ASEIO's Mirakl order-fee import; read 2026-11-19). |
+| KFL-5 | [Managing orders](https://sellerapi.kaufland.com/?page=orders) | `GET /v2/orders/{id_order}`, `GET /v2/order-units/{id_order_unit}`; status `open`, `need_to_be_sent` documented there, further values from the endpoint reference (checked 2026-11-19). |
 | MIR-4 | [OR28: Perform refunds on order lines](https://developer.mirakl.com/content/product/mmp/rest/seller/openapi3/orders/or28) | `PUT /api/orders/refund`, refunds per `order_line_id` with `amount`, `quantity`, `reason_code`, `shipping_amount`; refund roles on the shop key (checked 2026-11-14). |
 
 Generic Mirakl documentation does not prove a particular operator's account permissions or authorize unattended synchronization.
+
+
+## OTTO Market
+
+| ID | Source | Use |
+| --- | --- | --- |
+| OTTO-1 | [Sellers integration](https://api.otto.market/docs/sellers-integration) | Interface list (products, shipping profiles, availability, orders, shipments, returns, receipts, price reduction, returns warehouse, ads): no customer-message interface. Self-app in OTTO Partner Connect with client credentials; service-partner apps installed by link with full consent (checked 2026-11-19). |
+| OTTO-2 | [Orders](https://api.otto.market/docs/functional-interfaces/orders) | `GET /v4/orders/{salesOrderId}` and `/v4/orders/{orderNumber}`, `positionItems[].fulfillmentStatus` ANNOUNCED, PROCESSABLE, SENT, RETURNED, CANCELLED_BY_PARTNER, CANCELLED_BY_MARKETPLACE (checked 2026-11-19). |
+| OTTO-3 | [API guidelines](https://api.otto.market/docs/about-the-api/api-guides) | `POST /v1/token`; every interface must be named as a scope in the token request; sandbox `https://sandbox.api.otto.market` (checked 2026-11-19). |
 
 ## DocMorris
 

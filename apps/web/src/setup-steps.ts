@@ -45,23 +45,52 @@ export interface SetupInput {
   ebayOperatorApp?: boolean;
 }
 
-export const API_MARKETS = ["kaufland", "ebay", "shop_apotheke"] as const;
-export const MAIL_MARKETS = ["amazon", "docmorris", "shopify"] as const;
+/** Mirakl marketplaces: same adapter, one card each (core/marketplaces.ts). */
+export const MIRAKL_MARKETS = ["shop_apotheke", "douglas", "mediamarkt_saturn", "conrad", "decathlon"] as const;
+export const API_MARKETS = ["kaufland", "ebay", ...MIRAKL_MARKETS] as const;
+export const MAIL_MARKETS = ["amazon", "otto", "docmorris", "shopify"] as const;
 export type Market = (typeof API_MARKETS)[number] | (typeof MAIL_MARKETS)[number];
+type ApiMarket = (typeof API_MARKETS)[number];
 
-export const MARKET_KIND: Record<(typeof API_MARKETS)[number], string> = { kaufland: "kaufland_tickets", ebay: "ebay_messages", shop_apotheke: "mirakl_inbox" };
-const LABEL: Record<Market, string> = { kaufland: "Kaufland", ebay: "eBay", shop_apotheke: "Shop Apotheke", amazon: "Amazon", docmorris: "DocMorris", shopify: "Shopify" };
-const WAY: Record<Market, string> = {
-  kaufland: "Schnittstelle (Tickets)", ebay: "Schnittstelle (Nachrichten)", shop_apotheke: "Schnittstelle (Mirakl)",
-  amazon: "per Mail über das Postfach", docmorris: "per Mail über das Postfach", shopify: "per Mail über das Postfach",
+export const MARKET_KIND: Record<ApiMarket, string> = {
+  kaufland: "kaufland_tickets", ebay: "ebay_messages",
+  shop_apotheke: "mirakl_inbox", douglas: "mirakl_inbox", mediamarkt_saturn: "mirakl_inbox", conrad: "mirakl_inbox", decathlon: "mirakl_inbox",
 };
-const ZUGANG: Record<(typeof API_MARKETS)[number], { title: string; hint: string }> = {
+
+export function isMiraklMarket(market: string): market is (typeof MIRAKL_MARKETS)[number] {
+  return (MIRAKL_MARKETS as readonly string[]).includes(market);
+}
+
+/** Connections of one marketplace card. Mirakl marketplaces share a kind and differ by platform. */
+export function marketConnections<C extends { kind: string; default_source_platform: string }>(market: ApiMarket, connections: ReadonlyArray<C>): C[] {
+  return connections.filter((c) => c.kind === MARKET_KIND[market] && (!isMiraklMarket(market) || c.default_source_platform === market));
+}
+
+const LABEL: Record<Market, string> = {
+  kaufland: "Kaufland", ebay: "eBay", shop_apotheke: "Shop Apotheke", douglas: "Douglas", mediamarkt_saturn: "MediaMarkt/Saturn", conrad: "Conrad", decathlon: "Decathlon",
+  amazon: "Amazon", otto: "OTTO", docmorris: "DocMorris", shopify: "Shopify",
+};
+const WAY: Record<Market, string> = {
+  kaufland: "Schnittstelle (Tickets)", ebay: "Schnittstelle (Nachrichten)",
+  shop_apotheke: "Schnittstelle (Mirakl)", douglas: "Schnittstelle (Mirakl)", mediamarkt_saturn: "Schnittstelle (Mirakl)", conrad: "Schnittstelle (Mirakl)", decathlon: "Schnittstelle (Mirakl)",
+  amazon: "per Mail über das Postfach", otto: "per Mail über das Postfach, Bestellstatus per Schnittstelle", docmorris: "per Mail über das Postfach", shopify: "per Mail über das Postfach",
+};
+const mirakl = (name: string): { title: string; hint: string } => ({
+  title: "Backoffice-Adresse und API-Schlüssel eintragen",
+  hint: `Mirakl-Backoffice von ${name} → oben rechts der Benutzer → API-Schlüssel. Die Adresse ist die des Backoffice (https://….mirakl.net).`,
+});
+const ZUGANG: Record<ApiMarket, { title: string; hint: string }> = {
   kaufland: { title: "Client Key und Secret Key eintragen", hint: "Kaufland Seller Portal → Einstellungen → API. Ein bestehendes Schlüsselpaar kopieren, nicht neu erzeugen." },
   ebay: { title: "eBay-Anwendung eintragen (App ID, Cert ID, RuName)", hint: "Einmalig durch den Betreiber dieser SupportX-Installation aus seinem eBay-Entwicklerkonto. Der Händler meldet sich danach nur noch bei eBay an." },
-  shop_apotheke: { title: "Backoffice-Adresse und API-Schlüssel eintragen", hint: "Mirakl-Backoffice von Shop Apotheke → Benutzer → API-Schlüssel." },
+  shop_apotheke: mirakl("Shop Apotheke"),
+  douglas: mirakl("Douglas"),
+  mediamarkt_saturn: mirakl("MediaMarkt/Saturn"),
+  conrad: mirakl("Conrad"),
+  decathlon: mirakl("Decathlon"),
 };
 const EXTERN: Record<(typeof MAIL_MARKETS)[number], { title: string; hint: string }> = {
   amazon: { title: "In Seller Central das Postfach eintragen", hint: "Einstellungen → Benachrichtigungen: Käufer-Nachrichten an das Postfach. Nachrichten-Berechtigungen: das Postfach als Absender erlauben, sonst kommen Antworten nicht an." },
+  otto: { title: "In OTTO Partner Connect das Postfach eintragen", hint: "Kundenanfragen von OTTO kommen per Mail. Unter Einstellungen → Kontaktdaten die Adresse für den Kundenservice auf das Postfach setzen." },
   docmorris: { title: "Im DocMorris-Partnerportal das Postfach eintragen", hint: "Die Adresse für Kundenanfragen auf das Postfach setzen." },
   shopify: { title: "In Shopify das Postfach eintragen", hint: "Kontaktformular und Shop-Mails an das Postfach leiten." },
 };
@@ -96,8 +125,8 @@ export function weclappSetup(input: SetupInput): ChannelSetup {
 }
 
 export function marketSetup(market: Market, input: SetupInput): ChannelSetup {
-  if (market === "kaufland" || market === "ebay" || market === "shop_apotheke") {
-    const own = input.connections.filter((c) => c.kind === MARKET_KIND[market]);
+  if ((API_MARKETS as readonly string[]).includes(market)) {
+    const own = marketConnections(market as ApiMarket, input.connections);
     if (market === "ebay" && input.ebayOperatorApp) {
       // Like ASEIO: one click to eBay, no keys to type. The login creates the connection if needed.
       const steps: SetupStep[] = [
@@ -108,7 +137,7 @@ export function marketSetup(market: Market, input: SetupInput): ChannelSetup {
       const err = own.find((c) => c.health === "error" && !c.paused)?.last_error ?? null;
       return { ...finish(market, LABEL[market], WAY[market], steps, own.some(healthy), err), sending: sendingOf(market, own.find(healthy), input) };
     }
-    const steps: SetupStep[] = [{ key: "connect", ...ZUGANG[market], done: own.length > 0, action: "connect" }];
+    const steps: SetupStep[] = [{ key: "connect", ...ZUGANG[market as ApiMarket], done: own.length > 0, action: "connect" }];
     if (market === "ebay") steps.push({ key: "ebay_login", title: "Bei eBay mit dem Verkäuferkonto anmelden", done: own.some((c) => !!c.config.sellerUsername), action: "ebay_login" });
     steps.push({ key: "check", title: "Verbindung testen", done: own.some(healthy), action: "check" });
     // Without a connection, "test" and "log in" have nothing to act on.
@@ -120,10 +149,11 @@ export function marketSetup(market: Market, input: SetupInput): ChannelSetup {
   }
   const graph = input.connections.filter((c) => c.kind === "microsoft_graph");
   const mailboxOk = graph.some(healthy);
+  const mail = market as (typeof MAIL_MARKETS)[number];
   const confirmed = input.confirmations?.[market];
   const external: SetupStep = confirmed
-    ? { key: "external", title: EXTERN[market].title, hint: `Abgehakt${confirmed.by ? ` von ${confirmed.by}` : ""} am ${fmtDay(confirmed.at)}.`, done: true, external: true, action: "unconfirm" }
-    : { key: "external", ...EXTERN[market], hint: `${EXTERN[market].hint} Danach hier abhaken, SupportX kann das nicht selbst sehen.`, done: false, external: true, action: "confirm" };
+    ? { key: "external", title: EXTERN[mail].title, hint: `Abgehakt${confirmed.by ? ` von ${confirmed.by}` : ""} am ${fmtDay(confirmed.at)}.`, done: true, external: true, action: "unconfirm" }
+    : { key: "external", ...EXTERN[mail], hint: `${EXTERN[mail].hint} Danach hier abhaken, SupportX kann das nicht selbst sehen.`, done: false, external: true, action: "confirm" };
   const steps: SetupStep[] = [
     external,
     { key: "mailbox", title: "Microsoft-Postfach verbunden und geprüft", hint: "Siehe Karte „Microsoft-Postfach“.", done: mailboxOk },

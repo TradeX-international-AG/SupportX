@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { marketSetup, microsoftSetup, weclappSetup, type SetupInput } from "../../apps/web/src/setup-steps.ts";
+import { marketConnections, marketSetup, microsoftSetup, weclappSetup, type SetupInput } from "../../apps/web/src/setup-steps.ts";
 
 const empty: SetupInput = { connections: [], accounts: [], rules: [], routes: [], erp: null };
 const conn = (id: string, kind: string, extra: Partial<SetupInput["connections"][number]> = {}) =>
@@ -90,7 +90,7 @@ test("API market with refused keys: the next step is to enter new keys, not to t
   assert.equal(refused.next?.key, "connect");
   assert.equal(refused.next?.action, "credentials");
   assert.equal(refused.next?.title, "Zugangsdaten erneuern");
-  const outage = marketSetup("shop_apotheke", { ...empty, connections: [conn("m1", "mirakl_inbox", { health: "error", last_error: "HTTP 503" })] });
+  const outage = marketSetup("shop_apotheke", { ...empty, connections: [conn("m1", "mirakl_inbox", { health: "error", last_error: "HTTP 503", default_source_platform: "shop_apotheke" })] });
   assert.equal(outage.next?.key, "check", "an outage is not a key problem");
   const paused = marketSetup("ebay", { ...empty, connections: [conn("e1", "ebay_messages", { health: "error", paused: true, last_error: "Zugang abgelehnt (401)", config: { sellerUsername: "x" } })] });
   assert.notEqual(paused.next?.action, "credentials");
@@ -104,4 +104,21 @@ test("eBay with the installation's keyset: no keys to enter, the login is the fi
   const loggedIn = marketSetup("ebay", { ...empty, ebayOperatorApp: true, connections: [conn("e1", "ebay_messages", { config: { sellerUsername: "shop" } })] });
   assert.equal(loggedIn.connected, true);
   assert.equal(loggedIn.next, null);
+});
+
+test("Mirakl marketplaces: each card counts only the connections of its own operator", () => {
+  const douglas = conn("d1", "mirakl_inbox", { default_source_platform: "douglas" });
+  const forDouglas = marketSetup("douglas", { ...empty, connections: [douglas] });
+  assert.equal(forDouglas.connected, true);
+  assert.equal(forDouglas.label, "Douglas");
+  const forShopApotheke = marketSetup("shop_apotheke", { ...empty, connections: [douglas] });
+  assert.equal(forShopApotheke.connected, false, "a Douglas key does not connect Shop Apotheke");
+  assert.equal(forShopApotheke.next?.action, "connect");
+  assert.deepEqual(marketConnections("conrad", [douglas, conn("c1", "mirakl_inbox", { default_source_platform: "conrad" })]).map((c) => c.id), ["c1"]);
+});
+
+test("OTTO is a mail market: tick off the mailbox in Partner Connect", () => {
+  const otto = marketSetup("otto", { ...empty, connections: [conn("g1", "microsoft_graph")], confirmations: { otto: { at: "2026-11-19T10:00:00Z", by: "Lars" } } });
+  assert.equal(otto.connected, true);
+  assert.match(otto.steps[0]!.title, /OTTO Partner Connect/);
 });

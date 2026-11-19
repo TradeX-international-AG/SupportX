@@ -4,12 +4,13 @@
  * text of a relay-safe forward.
  */
 import type { SourcePlatform } from "./contracts.ts";
+import { PLATFORM_NAMES, RELAY_PLATFORMS as RELAY_LIST } from "./marketplaces.ts";
 
 export const MAX_FORWARD_RECIPIENTS = 10;
 export const MAX_FORWARD_COMMENT = 5000;
 
 /** Platforms whose mails arrive through a buyer relay address that must stay in the mailbox. */
-const RELAY_PLATFORMS: ReadonlySet<string> = new Set(["amazon", "ebay", "kaufland", "shop_apotheke"]);
+const RELAY_PLATFORMS: ReadonlySet<string> = new Set(RELAY_LIST);
 
 /** Sender domains of marketplace relay addresses, also when no routing rule set the platform. */
 const RELAY_DOMAINS = [/(^|\.)marketplace\.amazon\.[a-z.]+$/, /(^|\.)members\.ebay\.[a-z.]+$/];
@@ -58,7 +59,7 @@ export function maskAddresses(text: string): string {
   return text.replace(EMAIL_IN_TEXT, "[Adresse entfernt]");
 }
 
-const PLATFORM_NAME: Record<string, string> = { amazon: "Amazon", ebay: "eBay", kaufland: "Kaufland", shop_apotheke: "Shop Apotheke", docmorris: "DocMorris", shopify: "Shopify", email: "E-Mail", phone: "Telefon" };
+const PLATFORM_NAME: Record<string, string> = PLATFORM_NAMES;
 
 /** Body of a relay-safe forward: own comment, then the original text with all addresses removed. */
 export function forwardText(input: { comment: string; platform: string; receivedAt: Date | string; subject: string; direction: "inbound" | "outbound"; body: string; leftOut?: ReadonlyArray<string> }): string {
