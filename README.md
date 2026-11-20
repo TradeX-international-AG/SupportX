@@ -46,7 +46,7 @@ It is **self-hosted** (your server, your Microsoft tenant, your weclapp, your AI
 
 | | |
 | --- | --- |
-| ![The same inbox restyled green as "Kundenservice"](docs/screenshots/theme-gruen.webp) | ![The same inbox restyled blue as "Apotheken-Service"](docs/screenshots/theme-blau.webp) |
+| ![The same inbox as "Help Desk": dark with a yellow accent](docs/screenshots/theme-dunkel.webp) | ![The same inbox as "Kundenglück": pink and fully rounded](docs/screenshots/theme-rosa.webp) |
 
 Upload a `DESIGN.md` under Settings → Design (live preview before saving), or drop a `theme.json` with logo and font files on the server. Beyond that, change the source: it is all here. Details in [docs/THEMING.de.md](docs/THEMING.de.md).
 
