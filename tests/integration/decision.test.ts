@@ -43,6 +43,33 @@ describe("decision before the reply", () => {
     assert.match((await currentDraft(h, s, conv.id))!.body, /sorgfältig geprüft/);
   });
 
+  it("shows in the case that the reply is being written and why it failed, never silently", async () => {
+    h = await createHarness();
+    const s = await seedWorkspace(h);
+    loadDemoMails(h.graph);
+    await enqueue(h.ctx.db, { workspaceId: s.workspaceId, type: "mail.sync", payload: { connectionId: s.connectionId }, dedupeKey: `mail.sync:${s.connectionId}` });
+    await drainJobs(h.ctx, { maxJobs: 500 });
+    const conv = await caseByThread(h, s, "conv-shopify-wrong");
+    assert.equal((await getCase(h.ctx, s.agent, conv.id)).draftJob, null);
+
+    await requestRedraft(h.ctx, s.agent, conv.id, "customer_right");
+    const writing = (await getCase(h.ctx, s.agent, conv.id)).draftJob;
+    assert.equal(writing?.state, "writing");
+    assert.equal(writing?.decision, "customer_right");
+
+    // The worker gave up (e.g. Claude rejected the key): the case names the reason.
+    await h.ctx.db.query("UPDATE jobs SET status = 'failed', last_error = 'Claude: credit balance too low', updated_at = now() WHERE type = 'case.draft' AND workspace_id = $1", [s.workspaceId]);
+    const failed = (await getCase(h.ctx, s.agent, conv.id)).draftJob;
+    assert.equal(failed?.state, "failed");
+    assert.match(failed?.state === "failed" ? failed.error : "", /credit balance/);
+
+    // A new click writes the reply; the old failure no longer shows.
+    await requestRedraft(h.ctx, s.agent, conv.id, "customer_right");
+    await drainJobs(h.ctx);
+    assert.match((await currentDraft(h, s, conv.id))!.body, /Sie haben recht/);
+    assert.equal((await getCase(h.ctx, s.agent, conv.id)).draftJob, null);
+  });
+
   it("writes the refund reply when 'Bestellung erstatten' is clicked, without claiming the refund is done", async () => {
     for (const lang of ["de", "en"]) {
       const text = refundReplyText(lang, "302-1234567-1234567", "Ihr Team");

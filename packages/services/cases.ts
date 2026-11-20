@@ -257,7 +257,42 @@ export async function getCase(ctx: AppContext, actor: Actor, conversationId: str
     [...(messages as Array<{ direction: string; kind: string; body_text: string; received_at: Date }>),
      ...(related as Array<{ direction: string; kind: string; body_text: string; received_at: Date }>).filter((m) => m.kind === "own_copy")],
   );
-  return { conversation, messages, forwards, relatedMessages: related.reverse(), customerHistory, notes, orderLink, drafts, approvals, outbox, history, accounts, members, send, linkTargets, titleHints, writer, replyFiles, caseFiles, invoices, listingActions, amazonListings, marketplaceRefunds, creditNotes, creditNotesEnabled, refund, returnCheck: returnCheckResult, refundList, resolveAt };
+  const draftJob = await draftJobState(ctx, ws, conversationId, drafts as Array<{ created_at: Date }>);
+  return { conversation, messages, forwards, relatedMessages: related.reverse(), customerHistory, notes, orderLink, drafts, approvals, outbox, history, accounts, members, send, linkTargets, titleHints, writer, replyFiles, caseFiles, invoices, listingActions, amazonListings, marketplaceRefunds, creditNotes, creditNotesEnabled, refund, returnCheck: returnCheckResult, refundList, resolveAt, draftJob };
+}
+
+export type DraftJobState =
+  | { state: "writing"; decision: string | null; attempts: number; lastError: string | null; retryAt: Date | null }
+  | { state: "failed"; decision: string | null; error: string; at: Date }
+  | { state: "skipped"; decision: string | null; at: Date };
+
+/**
+ * The reply a person asked for with a decision button ("Kunde hat recht" …) is written
+ * by the worker. The case shows that it is being written, a failed attempt and why,
+ * and when no new draft came out of it, so a click is never silent.
+ */
+export async function draftJobState(ctx: AppContext, ws: string, conversationId: string, drafts: Array<{ created_at: Date }>): Promise<DraftJobState | null> {
+  const job = await one<{ status: string; payload: { decision?: string }; attempts: number; last_error: string | null; run_at: Date; created_at: Date; updated_at: Date }>(
+    ctx.db,
+    `SELECT status, payload, attempts, last_error, run_at, created_at, updated_at FROM jobs
+      WHERE workspace_id = $1 AND type = 'case.draft' AND payload->>'conversationId' = $2
+      ORDER BY id DESC LIMIT 1`,
+    [ws, conversationId],
+  );
+  if (!job) return null;
+  const decision = job.payload?.decision ?? null;
+  if (job.status === "queued" || job.status === "running") {
+    return { state: "writing", decision, attempts: job.attempts, lastError: job.last_error, retryAt: job.last_error ? job.run_at : null };
+  }
+  // Only what happened after the newest draft matters; older outcomes are history.
+  const newestDraft = drafts.reduce<number>((max, d) => Math.max(max, new Date(d.created_at).getTime()), 0);
+  if (job.status === "failed" && job.updated_at.getTime() > newestDraft) {
+    return { state: "failed", decision, error: job.last_error ?? "Unbekannter Fehler.", at: job.updated_at };
+  }
+  if (job.status === "done" && job.created_at.getTime() > newestDraft && Date.now() - job.updated_at.getTime() < 10 * 60_000) {
+    return { state: "skipped", decision, at: job.updated_at };
+  }
+  return null;
 }
 
 /**

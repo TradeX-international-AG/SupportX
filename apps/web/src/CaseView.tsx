@@ -95,6 +95,8 @@ interface CaseData {
   /** Where the case stands on the refund list ("Erstattungen"). */
   refundList?: { state: "none" | "open" | "done"; removed: boolean; item: Pick<RefundListItem, "done" | "amount" | "kind"> | null };
   resolveAt?: MarketplaceResolve | null;
+  /** The reply a decision button asked for: being written, failed (with reason) or not written. */
+  draftJob?: DraftJob | null;
 }
 
 /** Readable names for the Protokoll; unknown actions show their technical name. */
@@ -170,11 +172,12 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
       setError((err as Error).message);
     }
   }, [base, caseId]);
+  const writing = data?.draftJob?.state === "writing";
   useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), 8_000);
+    const timer = setInterval(() => void load(), writing ? 3_000 : 8_000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, writing]);
 
   const act = async (fn: () => Promise<unknown>, success?: string | ((result: unknown) => string)) => {
     setError(null);
@@ -346,7 +349,8 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
                 hasDraft={!!draft}
                 writer={data.writer ?? "rules"}
                 pendingOrder={c.order_match_status === "pending"}
-                onDecide={(decision) => act(() => api("POST", `${base}/cases/${caseId}/redraft`, { decision }), "Die Antwort wird geschrieben. Sie erscheint hier in wenigen Sekunden.")}
+                draftJob={data.draftJob ?? null}
+                onDecide={async (decision) => { await api("POST", `${base}/cases/${caseId}/redraft`, { decision }); await load(); }}
                 invoices={data.invoices ?? []}
                 orderUnique={c.order_match_status === "unique"}
                 onInvoice={() => act(() => api("POST", `${base}/cases/${caseId}/invoice-reply`), data.replyFiles?.supported ? "Rechnung aus weclapp angehängt. Bitte lesen und senden." : "Rechnung aus weclapp geholt. Dieser Kanal nimmt keine Dateien an, siehe Hinweis.")}
@@ -1205,6 +1209,11 @@ function OrderDetails({ order, links, origin, invoices, returns, refund, check, 
   );
 }
 
+type DraftJob =
+  | { state: "writing"; decision: string | null; attempts: number; lastError: string | null; retryAt: string | null }
+  | { state: "failed"; decision: string | null; error: string; at: string }
+  | { state: "skipped"; decision: string | null; at: string };
+
 const DECISION_LABEL: Record<string, string> = { customer_right: "Kunde hat recht", customer_wrong: "Kunde hat nicht recht", ask_customer: "Erst nachfragen", custom: "Individuell", invoice: "Rechnung senden", refund: "Bestellung erstatten" };
 const WRITER_NOTE: Record<string, string> = {
   own_key: "Die Antwort schreibt Claude über euren Schlüssel. Jeder Klick kostet Claude-Guthaben.",
@@ -1213,8 +1222,9 @@ const WRITER_NOTE: Record<string, string> = {
 };
 
 /** First a person decides, then the reply is written: nothing is generated (or paid for) on its own. */
-function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUnique, onInvoice, onDecide, onCompose, snippets, onSnippet, files }: {
-  current: string | null; hasDraft: boolean; writer: string; pendingOrder: boolean; invoices: string[]; orderUnique: boolean; onInvoice: () => void; onDecide: (decision: string) => void; onCompose: (instruction: string) => void;
+function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUnique, onInvoice, onDecide, onCompose, snippets, onSnippet, files, draftJob }: {
+  current: string | null; hasDraft: boolean; writer: string; pendingOrder: boolean; invoices: string[]; orderUnique: boolean; onInvoice: () => void; onDecide: (decision: string) => Promise<void>; onCompose: (instruction: string) => void;
+  draftJob: DraftJob | null;
   snippets: SnippetInfo[]; onSnippet: (snippetId: string) => void;
   files: React.ComponentProps<typeof WaitingFiles>;
 }) {
@@ -1222,13 +1232,30 @@ function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUniq
   const [custom, setCustom] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
+  // Right at the buttons: what the click started, or why it failed. Never silent.
+  const [asking, setAsking] = useState<string | null>(null);
+  const [clickError, setClickError] = useState<string | null>(null);
   const ai = writer !== "rules";
+  const writing = asking !== null || draftJob?.state === "writing";
+  const label = (key: string | null | undefined) => (key ? `„${DECISION_LABEL[key] ?? key}“` : "");
+  const decide = async (key: string) => {
+    if (writing) return;
+    setClickError(null);
+    setAsking(key);
+    try {
+      await onDecide(key);
+    } catch (err) {
+      setClickError(`Antwort ${label(key)} nicht angestoßen: ${(err as Error).message}`);
+    } finally {
+      setAsking(null);
+    }
+  };
   return (
     <div className="decision">
       <p className="small"><strong>{hasDraft ? "Andere Entscheidung? Dann wird die Antwort neu geschrieben." : "Erst entscheiden, dann wird die Antwort geschrieben."}</strong>{pendingOrder ? " Die Bestellung wird noch gesucht." : ""}</p>
       <div className="row wrap">
         {Object.entries(DECISION_LABEL).filter(([key]) => key !== "custom" && key !== "invoice" && key !== "refund").map(([key, label]) => (
-          <button key={key} className={current === key ? "primary" : key === "customer_right" && !hasDraft ? "primary" : ""} onClick={() => onDecide(key)}>{label}</button>
+          <button key={key} className={current === key ? "primary" : key === "customer_right" && !hasDraft ? "primary" : ""} disabled={writing} aria-busy={asking === key || (draftJob?.state === "writing" && draftJob.decision === key)} onClick={() => void decide(key)}>{label}</button>
         ))}
         <button className={custom || current === "custom" ? "primary" : ""} aria-expanded={custom} onClick={() => setCustom(!custom)}>Individuell</button>
         <button
@@ -1246,6 +1273,21 @@ function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUniq
           </span>
         )}
       </div>
+      {writing && (
+        <p className="notice ok" role="status">
+          {ai ? "Claude schreibt" : "Die Vorlage schreibt"} die Antwort {label(asking ?? draftJob?.decision)} … {ai ? "Das dauert meist 10 bis 30 Sekunden." : ""} Sie erscheint dann unten im Antwortfeld.
+          {draftJob?.state === "writing" && draftJob.lastError && (
+            <><br />Versuch {draftJob.attempts} ist fehlgeschlagen: {draftJob.lastError}{draftJob.retryAt ? ` Neuer Versuch ${fmtDate(draftJob.retryAt)}.` : ""}</>
+          )}
+        </p>
+      )}
+      {clickError && <p className="notice bad" role="alert">{clickError}</p>}
+      {!writing && draftJob?.state === "failed" && (
+        <p className="notice bad" role="alert">Die Antwort {label(draftJob.decision)} konnte nicht geschrieben werden ({fmtDate(draftJob.at)}): {draftJob.error} Bitte erneut klicken oder „Individuell“ nutzen.</p>
+      )}
+      {!writing && draftJob?.state === "skipped" && (
+        <p className="notice bad" role="alert">Es wurde keine neue Antwort {label(draftJob.decision)} geschrieben, weil inzwischen eine neue Kundennachricht eingegangen ist. Bitte die neue Nachricht lesen und erneut entscheiden.</p>
+      )}
       <p className="small muted">
         „Rechnung senden“: {!orderUnique ? "geht erst, wenn die Bestellung eindeutig zugeordnet ist." : invoices.length ? `holt ${invoices.length > 1 ? "die Rechnungen" : "die Rechnung"} ${invoices.join(", ")} als PDF aus weclapp, ohne KI-Kosten.` : "sucht die Rechnung der Bestellung in weclapp und holt sie als PDF, ohne KI-Kosten."}
       </p>
