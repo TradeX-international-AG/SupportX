@@ -1,10 +1,72 @@
-# SupportX
+<p align="center">
+  <img src="docs/screenshots/posteingang.webp" alt="SupportX inbox with an Amazon case, the matched weclapp order and the reply area" width="100%">
+</p>
 
-A self-hosted support inbox for marketplace sellers: Microsoft 365 mail in, order context from weclapp, AI-drafted replies, human review. Licensed under AGPL-3.0.
+<h1 align="center">SupportX</h1>
+
+<p align="center">
+  The open-source support inbox for marketplace sellers.
+  <br>
+  <a href="#quick-start-demo-no-credentials"><strong>Try the demo »</strong></a>
+  <br><br>
+  <a href="docs/SETUP.de.md">Setup</a>
+  ·
+  <a href="docs/THEMING.de.md">Theming</a>
+  ·
+  <a href="docs/CONNECTORS.md">Connectors</a>
+  ·
+  <a href="docs/ROADMAP.md">Roadmap</a>
+  ·
+  <a href="https://github.com/tradex-ag/SupportX/issues">Issues</a>
+  ·
+  <a href="https://tradexag.ch/termin/">Hosted version</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPLv3-111111" alt="License: AGPLv3"></a>
+  <img src="https://img.shields.io/badge/self--hosted-Docker%20Compose-111111" alt="Self-hosted with Docker Compose">
+  <img src="https://img.shields.io/badge/node-%E2%89%A522.12-111111" alt="Node.js 22.12 or newer">
+  <img src="https://img.shields.io/badge/PostgreSQL-16-111111" alt="PostgreSQL 16">
+</p>
+
+## About the project
+
+Sellers on several marketplaces answer the same questions in five portals and look up every order in their ERP to do it. SupportX puts both side by side: customer mails and marketplace messages land in one inbox, the matching order is looked up read-only in weclapp, and a reply draft is written that may only cite facts from that order. A person checks it and sends it with one click, through the route the question came in on.
+
+It is **self-hosted** (your server, your Microsoft tenant, your weclapp, your AI key), **open source** under AGPLv3, and **yours to restyle**: name, logo, colours, fonts and corner radius live in a file, not in the code.
 
 **An open-source product of [ASEIO](https://aseio.app)**, owned by TradeX International AG.
 
-**Status: 0.3.0.** Native eBay, Kaufland and Shop Apotheke (Mirakl) message channels, Amazon, DocMorris and Shopify via the Microsoft mailbox. The Microsoft mailbox runs in production with a first merchant (drafts only). eBay, Kaufland, Mirakl and weclapp are tested against local test doubles and a real PostgreSQL only, **not yet against live accounts**. Sending is off by default, and this is not a production-ready helpdesk. See [Implementation status](docs/CONNECTORS.md#implementation-status-version-020-2026-10-22).
+| | |
+| --- | --- |
+| ![Reply area: decision buttons, draft, cited facts and the reason sending is still locked](docs/screenshots/antwort.webp) | ![Report: reply time, topics, channels and problems per article](docs/screenshots/auswertung.webp) |
+| **Decide, then SupportX writes.** Server-side checks block unbacked facts, foreign links and "refund done" claims. | **See where it hurts.** Reply times, deadlines kept, and damage or wrong-item cases per article. |
+
+### Make it look like your shop
+
+| | |
+| --- | --- |
+| ![The same inbox restyled green as "Kundenservice"](docs/screenshots/theme-gruen.webp) | ![The same inbox restyled blue as "Apotheken-Service"](docs/screenshots/theme-blau.webp) |
+
+Upload a `DESIGN.md` under Settings → Design (live preview before saving), or drop a `theme.json` with logo and font files on the server. Beyond that, change the source: it is all here. Details in [docs/THEMING.de.md](docs/THEMING.de.md).
+
+### Built with
+
+TypeScript · Node.js · Fastify · React (Vite) · PostgreSQL · Claude (optional; deterministic German templates without a key) · Docker Compose with Caddy
+
+### Channels
+
+Microsoft 365 mail (with Amazon buyer-seller relay, DocMorris, Shopify and OTTO mails) · eBay · Kaufland · Shop Apotheke, Douglas, MediaMarkt/Saturn, Conrad and Decathlon (Mirakl) · order data from weclapp
+
+### Status
+
+**Version 0.20.** The Microsoft mailbox runs in production with a first merchant (drafts only). eBay, Kaufland, Mirakl, weclapp and the other integrations are tested against local test doubles and a real PostgreSQL only, **not yet against live accounts**. Sending is off by default, and this is not a production-ready helpdesk. See [Implementation status](docs/CONNECTORS.md#implementation-status-version-020-2026-10-22). Screenshots show the demo installation with synthetic data.
+
+### Editions
+
+| Community | Hosted by TradeX | Enterprise |
+| --- | --- | --- |
+| AGPLv3, free, self-hosted. Everything described in this README. | We set up mailbox, marketplaces and weclapp and run it for you. [Book a call](https://tradexag.ch/termin/). | `packages/ee/` under the SupportX Commercial License. Planned, nothing there yet. |
 
 ## What works
 
