@@ -1,15 +1,15 @@
-# Lizenzmodell: Open Core wie Cal.com
+# Lizenzmodell: Open Core
 
 Stand 20.11.2026. Vorschlag, entschieden ist nur der Rahmen (AGPL-Kern plus
 `packages/ee/`); was nach `packages/ee/` kommt, entscheidet Lars.
 
-## Wie Cal.com es macht
+## Das Muster
 
-Cal.com steht unter AGPLv3. Die `LICENSE`-Datei beginnt mit einem Kopf, der
-die Ordner `…/ee/` ausnimmt; dort gilt die „Cal.com Commercial License“
+Der Kern steht unter AGPLv3. Die `LICENSE`-Datei beginnt mit einem Kopf, der
+den Ordner `packages/ee/` ausnimmt; dort gilt eine kommerzielle Lizenz
 (Entwicklung und Test frei, Produktivbetrieb nur mit Abo, keine
-Weitergabe). Beiträge von außen laufen über eine Rechteeinräumung an
-Cal.com, damit Cal.com den Code auch kommerziell lizenzieren darf.
+Weitergabe). Beiträge von außen laufen über eine Rechteeinräumung an den
+Rechteinhaber, damit er den Code auch kommerziell lizenzieren darf.
 
 ## Was SupportX jetzt hat
 
@@ -24,7 +24,7 @@ Cal.com, damit Cal.com den Code auch kommerziell lizenzieren darf.
 
 ## Vorschlag: was nach `packages/ee/` gehört
 
-Faustregel wie bei Cal.com: Was ein einzelner Händler für seinen eigenen
+Faustregel: Was ein einzelner Händler für seinen eigenen
 Support braucht, bleibt AGPL. Was erst ab mehreren Teams, Mandanten oder
 für Agenturen und Hoster wichtig wird, kommt nach `ee`.
 
@@ -63,7 +63,7 @@ bleiben immer im Kern.
   ist. TradeX darf SupportX gehostet anbieten und `ee` dazu verkaufen.
   Voraussetzung: Fremde Beiträge kommen mit der Rechteeinräumung aus
   `CONTRIBUTING.md` (bisher sind alle Commits von TradeX).
-- **Der `ee`-Code ist im öffentlichen Repo sichtbar**, wie bei Cal.com. Er
+- **Der `ee`-Code ist im öffentlichen Repo sichtbar**. Er
   ist nur nicht frei nutzbar. Wer ihn verstecken will, braucht ein eigenes
   privates Repo statt `packages/ee/`.
 - **Abhängigkeiten:** AGPL-Kern und kommerzieller Teil dürfen keine
