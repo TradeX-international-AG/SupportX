@@ -22,4 +22,6 @@ SupportX is licensed under AGPL-3.0-only with the attribution term in [NOTICE](N
 
 By opening a pull request you confirm that you wrote the contribution or are otherwise entitled to submit it, that it is licensed under AGPL-3.0-only, and that you grant TradeX International AG a perpetual, worldwide, non-exclusive, royalty-free right to use, change, sublicense and relicense the contribution, including under other license terms. You keep your own copyright. Add a `Signed-off-by:` line to each commit (`git commit -s`, Developer Certificate of Origin, https://developercertificate.org/) to state this.
 
+Contributions to `packages/ee/` (SupportX Commercial License) need a separate written agreement with TradeX International AG; please open an issue first. Code outside `packages/ee/` must not import from it.
+
 Submit only material you are entitled to license under these terms. Preserve upstream license notices where applicable. Review dependency licenses before introducing them. Do not copy marketplace documentation, platform SDKs or proprietary application modules into the repository without checking their respective licenses.
