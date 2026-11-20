@@ -66,7 +66,7 @@ Microsoft 365 mail (with Amazon buyer-seller relay, DocMorris, Shopify and OTTO 
 
 | Community | Hosted by TradeX | Enterprise |
 | --- | --- | --- |
-| AGPLv3, free, self-hosted. Everything described in this README. | We set up mailbox, marketplaces and weclapp and run it for you. [Book a call](https://tradexag.ch/termin/). | `packages/ee/` under the SupportX Commercial License. Planned, nothing there yet. |
+| AGPLv3, free, self-hosted. Everything described in this README. Amazon and eBay need your own developer app (SP-API, eBay Developer Program). | Uses our Amazon and eBay apps, no own registration. We set up mailbox, marketplaces and weclapp and run it for you. [Book a call](https://tradexag.ch/termin/). | `packages/ee/` under the SupportX Commercial License. Planned, nothing there yet. |
 
 ## What works
 
