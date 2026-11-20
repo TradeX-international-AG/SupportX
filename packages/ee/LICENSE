@@ -1,0 +1,40 @@
+SupportX Commercial License
+Copyright (c) 2026-present TradeX International AG
+Draft 2026-11-20, not yet reviewed by a lawyer.
+
+This license applies only to the files in the "packages/ee/" directory of
+the SupportX repository ("the Commercial Software"). Everything outside that
+directory stays under AGPL-3.0-only with the terms in NOTICE.
+
+1. Production use. You may use the Commercial Software in production only
+   with a valid SupportX Commercial subscription or another written
+   agreement with TradeX International AG ("TradeX") that covers the number
+   of workspaces or users you run. TradeX states the terms of that
+   agreement.
+
+2. Development and testing. Without a subscription you may copy, run and
+   change the Commercial Software for development and testing, as long as
+   it does not serve real customer enquiries.
+
+3. Changes. You may change the Commercial Software for your own use under a
+   valid agreement. TradeX keeps all rights to the Commercial Software and
+   to changes you make to it. If you send changes to TradeX, you grant
+   TradeX the right to use them without restriction.
+
+4. No redistribution. You may not copy, merge, publish, distribute,
+   sublicense or sell the Commercial Software or changed versions of it,
+   and you may not offer it to third parties as a hosted service, unless an
+   agreement with TradeX allows it.
+
+5. Third-party components. Components from third parties keep their own
+   licenses.
+
+6. No warranty. The Commercial Software is provided "as is", without
+   warranty of any kind, express or implied. TradeX is not liable for any
+   claim, damage or other liability arising from it, as far as the law
+   allows.
+
+7. Law. Swiss law applies. Place of jurisdiction is the registered office
+   of TradeX International AG.
+
+For a subscription: info@tradexag.ch

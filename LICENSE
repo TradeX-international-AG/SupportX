@@ -1,3 +1,17 @@
+Copyright (c) 2026-present TradeX International AG
+
+Portions of this software are licensed as follows:
+
+* All content that resides under the "packages/ee/" directory of this
+  repository, if that directory exists, is licensed under the license
+  defined in "packages/ee/LICENSE" (SupportX Commercial License).
+* All third-party components incorporated into the SupportX software are
+  licensed under the original license provided by the owner of the
+  applicable component.
+* Content outside of the above mentioned directories or restrictions above
+  is available under the "AGPL-3.0-only" license as defined below, together
+  with the additional terms in the NOTICE file (AGPL section 7(b) and 7(e)).
+
 GNU AFFERO GENERAL PUBLIC LICENSE
 Version 3, 19 November 2007
 

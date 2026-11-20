@@ -28,4 +28,8 @@ Additional term under section 7(b) of the GNU AGPL v3.0
 
 The names "SupportX" and "ASEIO" and their logos are not licensed under
 the AGPL; they remain with TradeX International AG (section 7(e)).
+Files in the "packages/ee/" directory, if it exists, are not covered by the
+AGPL or by this NOTICE; they are licensed under the SupportX Commercial
+License in "packages/ee/LICENSE".
+
 Versions up to and including 0.9.1 were published under the MIT License.
