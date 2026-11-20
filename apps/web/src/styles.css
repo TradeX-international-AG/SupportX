@@ -170,6 +170,10 @@ details.card > summary h3 { display: inline; }
 .settings-sub { grid-column: 1 / -1; margin: 0 0 4px; max-width: 760px; }
 .card.setup { border-color: var(--text); display: flex; flex-direction: column; gap: 10px; }
 .card.setup.connected { box-shadow: inset 0 0 0 3px var(--card), inset 0 0 0 4px var(--ok); }
+/* Not connected: grey and faded with a red frame; only the buttons that set it up keep full strength.
+   Fades the topmost parts without a button (directly in the card or next to a button), so opacity never stacks. While a form is open in the card (entering keys) nothing is faded. */
+.card.setup.unconnected { background: var(--bg); border-color: var(--signal); box-shadow: inset 0 0 0 3px var(--bg), inset 0 0 0 4px var(--signal); }
+.card.setup.unconnected:not(:has(form)) :is(.card.setup.unconnected > *, .card.setup.unconnected :has(button) > *):not(button):not(:has(button)) { opacity: .45; filter: grayscale(1); }
 .setup-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .settings h3.setup-name { font-family: var(--sans); font-size: 18px; font-weight: 600; letter-spacing: -.01em; text-transform: none; color: var(--text); margin: 0; }
 .next-step { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-left: 3px solid var(--signal); background: var(--bg); padding: 10px 12px; }

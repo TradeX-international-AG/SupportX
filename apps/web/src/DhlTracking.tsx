@@ -36,7 +36,7 @@ export function DhlTrackingCard({ base, owner }: { base: string; owner: boolean 
   const connected = data.configured && data.status === "ok";
   const pill = !data.configured ? { cls: "pill muted", label: "Nicht eingerichtet" } : data.status === "error" ? { cls: "pill bad", label: "Fehler" } : connected ? { cls: "pill ok", label: "Angebunden" } : { cls: "pill warn", label: "Noch nicht getestet" };
   return (
-    <section className={`card setup${connected ? " connected" : ""}`} aria-label="DHL-Sendungsstatus">
+    <section className={`card setup${connected ? " connected" : " unconnected"}`} aria-label="DHL-Sendungsstatus">
       <div className="setup-head">
         <div>
           <h3 className="setup-name">DHL-Sendungsstatus</h3>

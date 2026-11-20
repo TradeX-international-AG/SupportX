@@ -48,7 +48,7 @@ export function PhoneHotlineCard({ base, owner }: { base: string; owner: boolean
   const ready = data.configured && data.webhookSecretSet;
   const pill = !data.configured ? { cls: "pill muted", label: "Nicht eingerichtet" } : !ready ? { cls: "pill warn", label: "Webhook fehlt" } : data.lastCallAt ? { cls: "pill ok", label: "Angebunden" } : { cls: "pill warn", label: "Noch kein Anruf" };
   return (
-    <section className={`card setup${ready && data.lastCallAt ? " connected" : ""}`} aria-label="Telefon-Hotline">
+    <section className={`card setup${ready && data.lastCallAt ? " connected" : " unconnected"}`} aria-label="Telefon-Hotline">
       <div className="setup-head">
         <div>
           <h3 className="setup-name">Telefon-Hotline</h3>

@@ -300,7 +300,7 @@ function SetupCard({ setup, owner, onAction, graphMailbox, onSending, serverSend
   const pill = setup.error ? { cls: "pill bad", label: "Fehler" } : setup.connected ? { cls: "pill ok", label: "Angebunden" } : doneCount === 0 ? { cls: "pill muted", label: "Nicht eingerichtet" } : { cls: "pill warn", label: `${doneCount} von ${countable} erledigt` };
   const ACTION_LABEL: Record<StepAction, string> = { connect: "Jetzt eintragen", credentials: "Zugangsdaten ändern", ebay_login: "Bei eBay anmelden", check: "Verbindung testen", rule: "Regel anlegen", route: "Antwortweg vermerken", erp: "Jetzt eintragen", confirm: "Erledigt, abhaken", unconfirm: "Haken entfernen" };
   return (
-    <section className={`card setup${setup.connected && !setup.error ? " connected" : ""}`} aria-label={setup.label}>
+    <section className={`card setup${setup.connected && !setup.error ? " connected" : setup.connected ? "" : " unconnected"}`} aria-label={setup.label}>
       <div className="setup-head">
         <div>
           <h3 className="setup-name">{setup.label}</h3>
