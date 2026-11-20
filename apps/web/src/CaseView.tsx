@@ -1255,7 +1255,9 @@ function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUniq
       <p className="small"><strong>{hasDraft ? "Andere Entscheidung? Dann wird die Antwort neu geschrieben." : "Erst entscheiden, dann wird die Antwort geschrieben."}</strong>{pendingOrder ? " Die Bestellung wird noch gesucht." : ""}</p>
       <div className="row wrap">
         {Object.entries(DECISION_LABEL).filter(([key]) => key !== "custom" && key !== "invoice" && key !== "refund").map(([key, label]) => (
-          <button key={key} className={current === key ? "primary" : key === "customer_right" && !hasDraft ? "primary" : ""} disabled={writing} aria-busy={asking === key || (draftJob?.state === "writing" && draftJob.decision === key)} onClick={() => void decide(key)}>{label}</button>
+          <button key={key} className={current === key ? "primary" : key === "customer_right" && !hasDraft ? "primary" : ""} disabled={writing} aria-busy={asking === key || (draftJob?.state === "writing" && draftJob.decision === key)} onClick={() => void decide(key)}>
+            {(asking === key || (asking === null && draftJob?.state === "writing" && draftJob.decision === key)) && <span className="spinner" aria-hidden="true" />}{label}
+          </button>
         ))}
         <button className={custom || current === "custom" ? "primary" : ""} aria-expanded={custom} onClick={() => setCustom(!custom)}>Individuell</button>
         <button
@@ -1274,11 +1276,13 @@ function Decision({ current, hasDraft, writer, pendingOrder, invoices, orderUniq
         )}
       </div>
       {writing && (
-        <p className="notice ok" role="status">
-          {ai ? "Claude schreibt" : "Die Vorlage schreibt"} die Antwort {label(asking ?? draftJob?.decision)} … {ai ? "Das dauert meist 10 bis 30 Sekunden." : ""} Sie erscheint dann unten im Antwortfeld.
+        <p className="notice ok writing" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <span>{ai ? "Claude schreibt" : "Die Vorlage schreibt"} die Antwort {label(asking ?? draftJob?.decision)} … {ai ? "Das dauert meist 10 bis 30 Sekunden." : ""} Sie erscheint dann unten im Antwortfeld.
           {draftJob?.state === "writing" && draftJob.lastError && (
             <><br />Versuch {draftJob.attempts} ist fehlgeschlagen: {draftJob.lastError}{draftJob.retryAt ? ` Neuer Versuch ${fmtDate(draftJob.retryAt)}.` : ""}</>
           )}
+          </span>
         </p>
       )}
       {clickError && <p className="notice bad" role="alert">{clickError}</p>}
