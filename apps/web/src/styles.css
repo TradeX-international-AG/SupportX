@@ -3,7 +3,9 @@
   color-scheme: light;
   --bg: #f8f9fa; --card: #fff; --text: #111111; --graphite: #303030; --muted: #6a6e73; --soft: #a4a8ad; --line: #e8e8e8;
   --accent: #111111; --signal: #d52b1e; --primary: #111111; --primary-text: #fff; --radius: 2px;
-  --ok: #1e7a46; --ok-bg: #e9f5ee; --warn: #8a5a00; --warn-bg: #fdf3dc; --bad: #b3261e; --bad-bg: #fbe9e7;
+  --ok: #1e7a46; --warn: #8a5a00; --bad: #b3261e;
+  /* Tinted from the status colour and the card colour, so a dark theme gets dark tints instead of light patches. */
+  --ok-bg: color-mix(in srgb, var(--ok) 12%, var(--card)); --warn-bg: color-mix(in srgb, var(--warn) 14%, var(--card)); --bad-bg: color-mix(in srgb, var(--bad) 12%, var(--card));
   --sans: "Geist Sans", "Geist", "Helvetica Neue", Arial, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-family: var(--sans); font-size: 14px; color: var(--text); background: var(--bg);
@@ -24,8 +26,8 @@ button:active:not(:disabled), a.button:active { transform: scale(0.96); }
 @media (prefers-reduced-motion: reduce) { button, a.button { transition: none; } button:active:not(:disabled) { transform: none; } }
 :focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
 button:disabled { opacity: .5; cursor: not-allowed; }
-button.primary { background: var(--text); border-color: var(--text); color: #fff; font-weight: 500; }
-button.primary:hover:not(:disabled) { background: var(--graphite); border-color: var(--graphite); }
+button.primary { background: var(--text); border-color: var(--text); color: var(--card); font-weight: 500; }
+button.primary:hover:not(:disabled) { background: var(--primary); border-color: var(--primary); filter: brightness(.92); }
 button.link { min-height: 28px; border: none; background: none; color: var(--text); padding: 0 4px; font-weight: 400; text-decoration: underline; text-decoration-color: var(--signal); text-underline-offset: 3px; }
 button.link:hover:not(:disabled) { background: none; text-decoration-thickness: 2px; }
 button.ghost { border-color: var(--line); background: none; }
@@ -51,7 +53,7 @@ label.row { flex-direction: row; align-items: center; }
 .demo-banner { background: var(--warn-bg); color: var(--warn); padding: 6px 16px; font-weight: 600; text-align: center; border-bottom: 1px solid var(--line); }
 .topbar { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--text); flex-wrap: wrap; }
 .topbar nav { display: flex; gap: 4px; }
-.tab { border: none; border-radius: 0; box-shadow: inset 0 -1px 0 transparent; } .tab.active { font-weight: 600; box-shadow: inset 0 -2px 0 var(--text); }
+.tab { border: none; border-radius: 0; box-shadow: inset 0 -1px 0 transparent; } .tab.active { font-weight: 600; box-shadow: inset 0 -2px 0 var(--primary); }
 .spacer { flex: 1; }
 .muted { color: var(--muted); } .small { font-size: 12px; } .pad { padding: 12px; }
 .error { color: var(--bad); } .warn-text { color: var(--warn); }
@@ -62,7 +64,7 @@ label.row { flex-direction: row; align-items: center; }
 .pill.ok { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
 .pill.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
 .pill.bad { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
-.pill.platform { font-weight: 500; background: var(--text); color: #fff; border-color: var(--text); }
+.pill.platform { font-weight: 500; background: var(--text); color: var(--card); border-color: var(--text); }
 .notice { padding: 8px 10px; border-radius: var(--radius); margin: 8px 0; background: var(--bg); }
 .notice.ok { background: var(--ok-bg); color: var(--ok); } .notice.warn { background: var(--warn-bg); color: var(--warn); } .notice.bad { background: var(--bad-bg); color: var(--bad); }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; min-width: 0; }
@@ -76,7 +78,7 @@ label.row { flex-direction: row; align-items: center; }
 .filters { display: flex; gap: 4px; padding: 10px; flex-wrap: wrap; background: var(--card); }
 .filters.dimmed { opacity: .55; }
 .chip { border-radius: var(--radius); min-height: 32px; padding: 0 12px; font-size: 13px; border-color: var(--line); }
-.chip:hover:not(:disabled) { border-color: var(--text); } .chip.active { background: var(--text); color: #fff; border-color: var(--text); }
+.chip:hover:not(:disabled) { border-color: var(--text); } .chip.active { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
 .case-item { padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
 .case-item:hover { background: var(--bg); } .case-item.selected { background: var(--bg); box-shadow: inset 3px 0 0 var(--signal); }
 .case-item .row:first-child { justify-content: space-between; }
@@ -147,14 +149,14 @@ details.more > summary, details.card > summary { cursor: pointer; color: var(--m
 details.card > summary h3 { display: inline; color: var(--text); }
 details.more[open] > summary { margin-bottom: 6px; }
 button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
-button.primary:hover:not(:disabled) { background: var(--graphite); border-color: var(--graphite); }
+button.primary:hover:not(:disabled) { background: var(--primary); border-color: var(--primary); filter: brightness(.92); }
 button.primary:disabled { opacity: .5; cursor: default; }
 button.danger { color: var(--bad); border-color: var(--bad); }
 button.danger:hover:not(:disabled) { background: var(--bad-bg); }
 button.ghost.danger { border-color: var(--bad-bg); }
 /* Inbox list: one status line per case instead of a row of badges. */
 .chip .count { margin-left: 6px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
-.chip.active .count { color: #fff; }
+.chip.active .count { color: var(--primary-text); }
 .case-item .row:first-child { gap: 8px; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .nowrap { white-space: nowrap; }
@@ -201,6 +203,7 @@ ol.steps li > button.link { flex: none; font-size: 12px; }
 .settings-tabs { grid-column: 1 / -1; display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; flex-wrap: wrap; }
 .settings-tabs .tab { padding-left: 14px; padding-right: 14px; background: transparent; }
 .credit { grid-column: 1 / -1; margin: 8px 0 0; }
+a { color: var(--text); text-decoration-color: var(--signal); text-underline-offset: 2px; }
 .credit a { color: inherit; }
 .order-links { margin-bottom: 8px; }
 a.button { display: inline-block; padding: 6px 12px; border: 1px solid var(--text); color: var(--text); text-decoration: none; font-size: 13px; }
@@ -374,7 +377,7 @@ a.button.refund-due:hover { background: var(--bad); border-color: var(--bad); }
 .close-case-fields .grow { flex: 1 1 260px; }
 .close-case-fields .grow input { width: 100%; }
 .close-case .actions { margin-top: 0; }
-.chip.active:hover:not(:disabled) { background: var(--graphite); border-color: var(--graphite); color: #fff; }
+.chip.active:hover:not(:disabled) { background: var(--primary); border-color: var(--primary); color: var(--primary-text); filter: brightness(.92); }
 .outcome-details { display: flex; flex-direction: column; gap: 8px; margin: 0; }
 .outcome-details label { margin-bottom: 0; }
 /* "Alle mit diesem Betreff-Muster": the pattern itself, readable and wrapping, under the label. */
