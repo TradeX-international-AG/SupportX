@@ -135,6 +135,7 @@ export function demoWeclappData(): FakeWeclappData {
     ],
     shipmentReturnReason: [{ id: "rr-1", name: "Ware beschädigt" }],
     currency: [{ id: "cur-eur", name: "EUR", currencySymbol: "€" }],
+    salesChannels: [{ key: "GROSS2", name: "Amazon" }, { key: "GROSS3", name: "DocMorris" }, { key: "GROSS4", name: "Webshop" }, { key: "GROSS5", name: "eBay" }],
     salesInvoice: [
       { id: "inv-1", invoiceNumber: "RE-9001", invoiceDate: day("2026-10-15"), status: "OPEN_ITEM_CREATED", paymentStatus: "PAID", salesInvoiceType: "STANDARD_INVOICE", salesOrderId: "so-amz-1", salesOrders: [{ id: "so-amz-1" }],
         // Lines for a credit note (gross price entry, like the fake recomputes).

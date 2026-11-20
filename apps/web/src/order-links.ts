@@ -10,6 +10,8 @@ export interface OrderLink {
   href: string;
   /** "refund" opens the marketplace's refund form; it is highlighted when the refund is due. */
   kind?: "refund";
+  /** Number to paste into the marketplace's search, for portals without a link to a single order; copied on click. */
+  copy?: string;
 }
 
 export interface OrderLinkInput {
@@ -20,10 +22,19 @@ export interface OrderLinkInput {
   erpBaseUrl?: string | null;
   /** Mirakl back office of the case's marketplace (Shop Apotheke, Douglas, …), if connected. */
   miraklBaseUrl?: string | null;
+  /** Back office per Mirakl operator ("douglas" → address), for e-mail cases whose order came from there. */
+  miraklBaseUrls?: Readonly<Record<string, string>> | null;
 }
 
 /** weclapp web page of a sales order, relative to the tenant origin; {id} is the order id (confirmed on a live tenant 2026-10-26). */
 export const WECLAPP_ORDER_PATH: string | null = "/app/sales-order/{id}";
+
+/**
+ * DocMorris partner portal, order list. The portal has no address for a single
+ * order (checked 2026-11-20: an order opens inline, the address stays the same),
+ * so the link opens the list and the order number is copied for its search.
+ */
+export const DOCMORRIS_SALES_URL = "https://partner.docmorris.de/marketplace/sales?tab=to-manage";
 
 const AMAZON_ORDER = /^\d{3}-\d{7}-\d{7}$/;
 const EBAY_ORDER = /^\d{2}-\d{5}-\d{5}$/;
@@ -62,8 +73,13 @@ export function orderLinks(input: OrderLinkInput): OrderLink[] {
   else if (order.orderNumberAtCustomer) {
     // Mirakl marketplaces (Shop Apotheke, Douglas, …): the back office of the operator the case came from.
     const market = MIRAKL_PLATFORMS.find((p) => platforms.has(p));
-    const mirakl = market ? origin(input.miraklBaseUrl) : null;
+    const mirakl = market ? origin(input.miraklBaseUrls?.[market] ?? input.miraklBaseUrl) : null;
     if (market && mirakl) links.push({ label: `Bestellung bei ${PLATFORM_NAMES[market]}`, href: `${mirakl}/mmp/shop/order/${encodeURIComponent(order.orderNumberAtCustomer)}` });
+  }
+  if (platforms.has("docmorris") && !amazon && !ebay) {
+    // The portal lists the order under the number weclapp keeps as order number (e.g. 1P5160).
+    const number = order.orderNumber?.trim() || order.orderNumberAtCustomer?.trim();
+    links.push({ label: "Bestellung bei DocMorris", href: DOCMORRIS_SALES_URL, ...(number ? { copy: number } : {}) });
   }
   return links;
 }

@@ -279,6 +279,8 @@ export interface OrderRecord {
   orderDate?: string;
   status?: string;
   salesChannel?: string;
+  /** Name of the sales channel as set up in weclapp (salesChannel/activeSalesChannels), e.g. "DocMorris". */
+  salesChannelName?: string;
   ecommerceConnectionId?: string;
   customerId?: string;
   tags: ReadonlyArray<string>;

@@ -15,6 +15,8 @@ interface CaseRow {
   category: "support" | "info";
   category_reason: string | null;
   source_platform: string;
+  /** Sales channel of the order when it differs from the way the enquiry came in (e.g. "DocMorris" for an e-mail). */
+  origin_label?: string | null;
   customer_address: string | null;
   customer_name: string | null;
   order_match_status: string;
@@ -192,7 +194,9 @@ export function Inbox({ workspaceId, role, openCase }: { workspaceId: string; ro
                   {c.subject || "(ohne Betreff)"}
                 </div>
                 <div className="row wrap small">
-                  <span className="tag">{PLATFORM_LABEL[c.source_platform] ?? c.source_platform}</span>
+                  <span className="tag" title={c.origin_label ? `Bestellung über ${c.origin_label}, eingegangen per ${PLATFORM_LABEL[c.source_platform] ?? c.source_platform}` : undefined}>
+                    {c.origin_label ? `${c.origin_label} · ${PLATFORM_LABEL[c.source_platform] ?? c.source_platform}` : PLATFORM_LABEL[c.source_platform] ?? c.source_platform}
+                  </span>
                   {c.category === "support" && (c.topic ?? c.intent) && <span className="muted">{INTENT_LABEL[(c.topic ?? c.intent)!] ?? c.topic ?? c.intent}</span>}
                   <span className={`state ${state.tone}`}>{state.text}</span>
                   {c.refund === "due" && c.status !== "closed" && <span className="refund-flag" title="Ware ist in weclapp als zurück gebucht, eine Erstattung ist noch nicht erfasst.">Erstattung offen</span>}

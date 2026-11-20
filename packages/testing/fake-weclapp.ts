@@ -16,6 +16,8 @@ export interface FakeWeclappData {
   incomingGoods?: Array<Record<string, unknown>>;
   shipmentReturnReason?: Array<Record<string, unknown>>;
   currency?: Array<Record<string, unknown>>;
+  /** Sales channels as set up in weclapp ({ key: "NET3", name: "DocMorris" }). */
+  salesChannels?: Array<{ key: string; name: string }>;
 }
 
 export interface FakeWeclapp {
@@ -107,6 +109,8 @@ export async function startFakeWeclapp(data: FakeWeclappData, opts: { token: str
       res.writeHead(200, { "Content-Type": "application/pdf" });
       return res.end(Buffer.from(`%PDF-1.4\n% Rechnung ${String(inv.invoiceNumber)}\n%%EOF`));
     }
+    // Sales channel names as set up by the merchant (key → name).
+    if (url.pathname === "/webapp/api/v2/salesChannel/activeSalesChannels") return send(200, { result: data.salesChannels ?? [] });
     const match = /^\/webapp\/api\/v2\/(salesOrder|shipment|salesInvoice|article|incomingGoods|shipmentReturnReason|currency)$/.exec(url.pathname);
     if (!match) return send(404, { error: "not found" });
     // A user without the right for this resource (e.g. no access to goods receipts).

@@ -21,6 +21,7 @@ import { formatMoney, type ReturnCheck } from "../../../packages/core/return-che
 import { formatAmount, type RefundListItem } from "../../../packages/core/refund-list.ts";
 import type { MarketplaceResolve } from "../../../packages/core/marketplace-resolve.ts";
 import { isOrderNotice } from "../../../packages/core/order-notice.ts";
+import { detectOrigin, type OrderOrigin } from "../../../packages/core/order-origin.ts";
 
 type Role = "owner" | "agent" | "viewer";
 type Rec = Record<string, unknown>;
@@ -54,7 +55,7 @@ interface OrderSnapshot {
 const TONE_CLASS: Record<ReturnSummary["tone"], string> = { good: "ok", warn: "warn", bad: "bad", neutral: "" };
 const returnsOf = (order: OrderSnapshot) => returnSummary(order);
 interface CaseData {
-  linkTargets?: { erp_base_url: string | null; mirakl_base_url: string | null } | null;
+  linkTargets?: { erp_base_url: string | null; mirakl_base_url: string | null; mirakl_base_urls?: Record<string, string> | null } | null;
   conversation: Rec & { topic: string | null; topic_source: string | null; waiting_since: string | null; reply_hours: number | null; snooze_until: string | null; outcome: string | null; outcome_note: string | null; outcome_at: string | null; id: string; subject: string; status: string; category: "support" | "info"; category_reason: string | null; customer_address: string | null; source_platform: string; order_match_status: string; merchant_account_id: string | null; merchant_account_name: string | null; connection_name: string; assignee_user_id: string | null; last_error: string | null; order_references: string[] };
   messages: Array<{ id: string; direction: string; kind: string; outbox_id?: string | null; from_address: string; from_name: string | null; reply_to: Array<{ address: string; name?: string }> | null; subject: string; body_text: string; received_at: string; has_attachments: boolean; removed_remotely_at: string | null }>;
   /** Forwards of mails of this case, sent by a person. */
@@ -196,6 +197,7 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
   const draft = data.drafts.find((d) => d.status === "proposed" || d.status === "edited") ?? null;
 
   const due = deadlineState(c.waiting_since, c.reply_hours);
+  const origin = caseOrigin(data);
   const sender = data.messages.find((m) => m.direction === "inbound")?.from_address ?? c.customer_address ?? "";
   const setCategory = (category: "support" | "info", remember: Remember, pattern?: string) =>
     act(() => api("POST", `${base}/cases/${caseId}/category`, { category, remember, pattern }), (result) => {
@@ -258,7 +260,9 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
         <div>
           <h2>{c.subject || "(ohne Betreff)"}</h2>
           <div className="meta small muted">
-            <span className="pill platform">{PLATFORM_LABEL[c.source_platform] ?? c.source_platform}</span>
+            {origin && origin.platform !== c.source_platform
+              ? <span className="pill platform" title={`Herkunft: ${origin.detail}. Eingegangen per ${PLATFORM_LABEL[c.source_platform] ?? c.source_platform}.`}>{origin.label}{origin.via === "text" ? "?" : ""} · {PLATFORM_LABEL[c.source_platform] ?? c.source_platform}</span>
+              : <span className="pill platform">{PLATFORM_LABEL[c.source_platform] ?? c.source_platform}</span>}
             <span>{c.connection_name}</span>
             {data.orderLink?.status === "unique" && data.orderLink.snapshot && (() => {
               const rs = returnsOf(data.orderLink.snapshot);
@@ -927,6 +931,19 @@ function RefundListStatus({ status, canEdit, onAdd }: { status: CaseData["refund
   );
 }
 
+/** Sales channel the enquiry belongs to (see core/order-origin.ts): case, seller account, weclapp channel, order number, then customer text. */
+function caseOrigin(data: CaseData): OrderOrigin | null {
+  const c = data.conversation;
+  const order = data.orderLink?.status === "unique" ? data.orderLink.snapshot : null;
+  const customer = data.messages.filter((m) => m.direction === "inbound" && m.kind === "customer").slice(0, 3).map((m) => m.body_text).join("\n");
+  return detectOrigin({
+    sourcePlatform: c.source_platform,
+    accountPlatform: data.accounts.find((a) => a.id === c.merchant_account_id)?.platform,
+    order,
+    text: `${c.subject ?? ""}\n${customer}`,
+  });
+}
+
 function OrderPanel({ data, canEdit, onLink, onRefresh, invoiceFiles, documentBase, draft, replyFiles, onFetchInvoices, onAttach, onRefundClicked }: {
   data: CaseData; canEdit: boolean; onLink: (body: { reference?: string; candidateId?: string }) => void; onRefresh: () => Promise<void> | void;
   invoiceFiles: CaseFile[]; documentBase: string; draft: Draft | null; replyFiles: { supported: boolean; note: string };
@@ -938,6 +955,7 @@ function OrderPanel({ data, canEdit, onLink, onRefresh, invoiceFiles, documentBa
   const link = data.orderLink;
   const order = link?.snapshot ?? null;
   const c = data.conversation;
+  const origin = caseOrigin(data);
   return (
     <div>
       {link && (
@@ -968,10 +986,12 @@ function OrderPanel({ data, canEdit, onLink, onRefresh, invoiceFiles, documentBa
           returns={<><ReturnBox order={order} canEdit={canEdit} onRefresh={onRefresh} />{data.returnCheck?.applicable && <ReturnCheckBox check={data.returnCheck} />}</>}
           links={orderLinks({
             order,
-            platforms: [c.source_platform, data.accounts.find((a) => a.id === c.merchant_account_id)?.platform],
+            platforms: [c.source_platform, data.accounts.find((a) => a.id === c.merchant_account_id)?.platform, origin?.platform],
             erpBaseUrl: data.linkTargets?.erp_base_url,
             miraklBaseUrl: data.linkTargets?.mirakl_base_url,
+            miraklBaseUrls: data.linkTargets?.mirakl_base_urls,
           })}
+          origin={origin}
           invoices={
             <>
           <h4>Rechnungen</h4>
@@ -1114,7 +1134,7 @@ function WeightBox({ order }: { order: OrderSnapshot }) {
   );
 }
 
-function OrderDetails({ order, links, invoices, returns, refund, check, onRefundClicked }: { order: OrderSnapshot; links: OrderLink[]; invoices: React.ReactNode; returns: React.ReactNode; refund?: RefundDue; check?: ReturnCheck | null; onRefundClicked: () => void }) {
+function OrderDetails({ order, links, origin, invoices, returns, refund, check, onRefundClicked }: { order: OrderSnapshot; links: OrderLink[]; origin?: OrderOrigin | null; invoices: React.ReactNode; returns: React.ReactNode; refund?: RefundDue; check?: ReturnCheck | null; onRefundClicked: () => void }) {
   const due = refund?.state === "due";
   const blockers = check?.findings.filter((f) => f.tone === "bad") ?? [];
   const hasRefundLink = links.some((l) => l.kind === "refund");
@@ -1133,13 +1153,17 @@ function OrderDetails({ order, links, invoices, returns, refund, check, onRefund
         <div className="row wrap order-links">
           {links.map((l) => (
             <a key={l.href} className={l.kind === "refund" && due ? "button refund-due" : "button"} href={l.href} target="_blank" rel="noopener noreferrer"
-              onClick={l.kind === "refund" ? onRefundClicked : undefined}
-              title={l.kind === "refund" ? `${due ? "Ware ist zurück, Erstattung ist noch offen. " : ""}Öffnet die Erstattung im Marktplatz und schreibt unten die Antwort, dass umgehend erstattet wird.` : undefined}>
+              onClick={l.kind === "refund" ? onRefundClicked : l.copy ? () => { void navigator.clipboard?.writeText(l.copy!).catch(() => undefined); } : undefined}
+              title={l.kind === "refund" ? `${due ? "Ware ist zurück, Erstattung ist noch offen. " : ""}Öffnet die Erstattung im Marktplatz und schreibt unten die Antwort, dass umgehend erstattet wird.` : l.copy ? `Öffnet die Bestellliste und kopiert die Nummer ${l.copy} für die Suche dort.` : undefined}>
               {l.label} ↗
             </a>
           ))}
         </div>
       )}
+      {links.filter((l) => l.copy).map((l) => (
+        <p key={`copy-${l.href}`} className="small muted">{l.label.replace(/^Bestellung bei /, "")} hat keinen direkten Link zur einzelnen Bestellung: Beim Klick wird {l.copy} kopiert, dort in die Suche einfügen.</p>
+      ))}
+      {origin && <div className="kv"><span>Herkunft</span><span title={origin.detail}>{origin.label}{origin.via === "text" ? " (laut Kundentext)" : ""}</span></div>}
       <div className="kv"><span>Auftrag</span><strong>{order.orderNumber ?? order.id}</strong></div>
       {order.orderNumberAtCustomer && <div className="kv"><span>Marktplatz-Nr.</span><span>{order.orderNumberAtCustomer}</span></div>}
       <div className="kv"><span>Datum / Status</span><span>{fmtDate(order.orderDate)} · {order.status ?? "–"}</span></div>

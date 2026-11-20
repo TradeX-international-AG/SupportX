@@ -1,4 +1,5 @@
 import { caseForwards } from "./forwards.ts";
+import { detectOrigin } from "../core/order-origin.ts";
 import { caseAmazonListingAccess, listCaseListingActions } from "./amazon-listings.ts";
 import { listCaseMarketplaceRefunds } from "./amazon-refunds.ts";
 import { caseCreditNoteAccess, listCaseCreditNotes } from "./credit-notes.ts";
@@ -91,10 +92,11 @@ export async function listCases(ctx: AppContext, actor: Actor, filter: CaseFilte
     `SELECT * FROM (
        SELECT c.id, c.subject, c.status, c.category, c.category_reason, c.source_platform, c.customer_address, c.customer_name, c.order_match_status, c.last_message_at, c.last_error, c.snooze_until, c.topic, c.topic_source, c.outcome,
               (SELECT jsonb_build_object('lines', coalesce(ol.snapshot->'lines', '[]'), 'shipments', coalesce(ol.snapshot->'shipments', '[]'), 'invoices', coalesce(ol.snapshot->'invoices', '[]'),
-                                         'returns', ol.snapshot->'returns', 'returnsError', ol.snapshot->'returnsError', 'orderNumber', ol.snapshot->'orderNumber', 'orderNumberAtCustomer', ol.snapshot->'orderNumberAtCustomer')
+                                         'returns', ol.snapshot->'returns', 'returnsError', ol.snapshot->'returnsError', 'orderNumber', ol.snapshot->'orderNumber', 'orderNumberAtCustomer', ol.snapshot->'orderNumberAtCustomer',
+                                         'salesChannelName', ol.snapshot->'salesChannelName')
                  FROM order_links ol WHERE ol.workspace_id = c.workspace_id AND ol.conversation_id = c.id AND ol.is_current AND ol.status = 'unique' AND ol.snapshot IS NOT NULL) AS order_return,
               (SELECT ol.external_order_id FROM order_links ol WHERE ol.workspace_id = c.workspace_id AND ol.conversation_id = c.id AND ol.is_current AND ol.status = 'unique') AS external_order_id,
-              ma.name AS merchant_account_name, cc.display_name AS connection_name, cc.kind AS connection_kind, u.display_name AS assignee_name,
+              ma.name AS merchant_account_name, ma.platform AS merchant_account_platform, cc.display_name AS connection_name, cc.kind AS connection_kind, u.display_name AS assignee_name,
               (SELECT d.status FROM drafts d WHERE d.conversation_id = c.id ORDER BY d.created_at DESC LIMIT 1) AS draft_status,
               (SELECT d.intent FROM drafts d WHERE d.conversation_id = c.id ORDER BY d.created_at DESC LIMIT 1) AS intent,
               (SELECT o.state FROM outbox o WHERE o.conversation_id = c.id ORDER BY o.created_at DESC LIMIT 1) AS outbox_state,
@@ -122,7 +124,9 @@ export async function listCases(ctx: AppContext, actor: Actor, filter: CaseFilte
       const related = await relatedRefundCases(ctx, actor.workspaceId, row.id, external_order_id, [order.orderNumber, order.orderNumberAtCustomer]);
       refund = refundDue({ order, outcome: row.outcome, subject: row.subject as string | null, related }).state;
     }
-    return { ...row, refund };
+    // Sales channel of the order, for the list (no customer text here: that only labels the opened case).
+    const origin = detectOrigin({ sourcePlatform: row.source_platform as string, accountPlatform: row.merchant_account_platform as string | null, order });
+    return { ...row, refund, origin_label: origin && origin.platform !== row.source_platform ? origin.label : null };
   }));
 }
 
@@ -221,13 +225,19 @@ export async function getCase(ctx: AppContext, actor: Actor, conversationId: str
     m.kind = "own_copy";
   }
   // Addresses for links to the order (weclapp tenant, Mirakl back office); no credentials.
-  const linkTargets = await one<{ erp_base_url: string | null; mirakl_base_url: string | null }>(
+  const linkTargets = await one<{ erp_base_url: string | null; mirakl_base_url: string | null; mirakl_base_urls: Record<string, string> | null }>(
     ctx.db,
     `SELECT (SELECT base_url FROM erp_connections WHERE workspace_id = $1) AS erp_base_url,
             (SELECT cc.config->>'baseUrl' FROM channel_connections cc
               WHERE cc.workspace_id = $1 AND cc.kind = 'mirakl_inbox'
                 AND cc.default_source_platform = (SELECT source_platform FROM conversations WHERE workspace_id = $1 AND id = $2)
-              ORDER BY cc.created_at LIMIT 1) AS mirakl_base_url`,
+              ORDER BY cc.created_at LIMIT 1) AS mirakl_base_url,
+            -- Back office per Mirakl operator, for cases by e-mail whose order came from that marketplace.
+            (SELECT json_object_agg(x.platform, x.base_url) FROM (
+               SELECT DISTINCT ON (cc.default_source_platform) cc.default_source_platform AS platform, cc.config->>'baseUrl' AS base_url
+                 FROM channel_connections cc
+                WHERE cc.workspace_id = $1 AND cc.kind = 'mirakl_inbox' AND cc.config->>'baseUrl' IS NOT NULL
+                ORDER BY cc.default_source_platform, cc.created_at) x) AS mirakl_base_urls`,
     [ws, conversationId],
   );
   const link = orderLink as { status: string; snapshot: OrderRecord | null } | null;

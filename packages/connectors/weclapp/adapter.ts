@@ -315,6 +315,9 @@ export function mapCallerCheck(order: Json, shipments: Json[] = []): CallerCheck
   };
 }
 
+/** Sales channel names per weclapp tenant (key → name), see #salesChannelName. */
+const CHANNEL_NAMES = new Map<string, { until: number; names: Map<string, string> }>();
+
 export class WeclappOrderProvider implements OrderProvider {
   readonly kind = "weclapp" as const;
   readonly #config: WeclappConfig;
@@ -379,9 +382,12 @@ export class WeclappOrderProvider implements OrderProvider {
     }
     if (rejected.length) console.warn(`[weclapp] Filter abgelehnt, Daten fehlen evtl. am Auftrag: ${rejected.join(", ")}`);
     const ownShipments = shipments.filter((s) => belongsToOrder(s, id));
-    const [articles, returns, currency] = await Promise.all([this.#articles(order), this.#returns(order, ownShipments), this.#currency(str(order.recordCurrencyId))]);
+    const [articles, returns, currency, channelName] = await Promise.all([
+      this.#articles(order), this.#returns(order, ownShipments), this.#currency(str(order.recordCurrencyId)), this.#salesChannelName(str(order.salesChannel)),
+    ]);
     // Weights count as read only when every linked article could be read.
-    return mapOrder(order, ownShipments, [...invoices.values()], new Date().toISOString(), articles.rows, returns, !articles.failed, currency);
+    const record = mapOrder(order, ownShipments, [...invoices.values()], new Date().toISOString(), articles.rows, returns, !articles.failed, currency);
+    return channelName ? { ...record, salesChannelName: channelName } : record;
   }
 
   /**
@@ -418,6 +424,28 @@ export class WeclappOrderProvider implements OrderProvider {
         : `Retouren konnten nicht gelesen werden: ${(error as Error).message}`;
       return { records: [], error: detail };
     }
+  }
+
+  /**
+   * Name the merchant gave the order's sales channel in weclapp (e.g. NET3 → "DocMorris"),
+   * from GET /salesChannel/activeSalesChannels ({ key, name }). Read once per tenant and
+   * kept for 10 minutes. Best effort: a failure only drops the name.
+   */
+  async #salesChannelName(key: string | undefined): Promise<string | undefined> {
+    if (!key) return undefined;
+    const cacheKey = `${this.#baseUrl}|${this.#config.apiToken}`;
+    let entry = CHANNEL_NAMES.get(cacheKey);
+    if (!entry || entry.until < Date.now()) {
+      try {
+        const rows = await this.#get("salesChannel/activeSalesChannels", {});
+        entry = { until: Date.now() + 10 * 60_000, names: new Map(rows.map((r) => [str(r.key) ?? "", str(r.name) ?? ""] as [string, string]).filter(([k, n]) => k && n)) };
+      } catch {
+        entry = { until: Date.now() + 60_000, names: new Map() };
+      }
+      CHANNEL_NAMES.set(cacheKey, entry);
+    }
+    const name = entry.names.get(key);
+    return name && name !== key ? name : undefined;
   }
 
   /** Name of the order currency (e.g. "EUR"). Best effort: a failure only drops the currency label. */

@@ -67,6 +67,12 @@ describe("weclapp adapter (contract against test double)", () => {
     assert.ok(fake.requests.every((r) => r.startsWith("GET ")), "adapter only reads");
   });
 
+  it("names the order's sales channel as set up in weclapp", async () => {
+    const result = await provider.findOrders([order("DM-2026-000123")], scope(DEMO.channels.docmorris));
+    assert.equal(result.status, "unique");
+    if (result.status === "unique") assert.equal(result.order.salesChannelName, "DocMorris");
+  });
+
   it("separates identical order numbers of different seller accounts", async () => {
     const shop = await provider.findOrders([order("1001")], scope(DEMO.channels.shopify));
     const ebay = await provider.findOrders([order("1001")], scope(DEMO.channels.ebay));
