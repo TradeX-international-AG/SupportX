@@ -140,15 +140,17 @@ function RefundRow({ item, weclappHref, canEdit, busy, onOpenCase, onDone, onDet
         {item.note && <div className="muted">Notiz: {item.note}</div>}
       </div>
       <div className="refund-amount">
-        {canEdit && !done ? (
+        {/* A known amount (marketplace notice or result in the case) is fixed here; only a missing one can be entered. */}
+        {canEdit && !done && !item.amount ? (
           <label className="field">
             <span>Betrag</span>
             <input inputMode="decimal" value={amount} placeholder="z. B. 12,50" disabled={busy}
               onChange={(e) => setAmount(e.target.value)} onKeyDown={blurOnEnter}
               onBlur={() => { if (amount.trim() !== savedAmount) onDetails({ amount: amount.trim() || null }); }} />
           </label>
-        ) : <div className="refund-sum">{amountText(item.amount) || "–"}</div>}
+        ) : <><div className="field"><span>Betrag</span></div><div className="refund-sum">{amountText(item.amount) || "–"}</div></>}
         {item.amount?.from === "notice" && <div className="small muted">laut Meldung des Marktplatzes</div>}
+        {item.amount?.from === "entered" && <div className="small muted">aus dem Fall</div>}
         {item.creditNoteDrafts.map((d, n) => (
           <div key={n} className="small" title="Aus SupportX in weclapp angelegt. Buchen erst in weclapp.">
             In weclapp: Gutschrift {d.number ?? ""} {DRAFT_STATE[d.state] ?? d.state} · {formatAmount(d.cents, item.amount?.currency ?? "EUR").replace(/ /g, " ")}
