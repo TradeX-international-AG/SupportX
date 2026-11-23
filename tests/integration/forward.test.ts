@@ -5,7 +5,8 @@ import { DEMO } from "../../packages/testing/demo-data.ts";
 import { getCase } from "../../packages/services/cases.ts";
 import { setSendEnabled } from "../../packages/services/connections.ts";
 import type { ServiceError } from "../../packages/services/context.ts";
-import { forwardMessage, getForwardInfo, resolveForward } from "../../packages/services/forwards.ts";
+import { forwardCase, forwardMessage, getCaseForwardInfo, getForwardInfo, resolveForward } from "../../packages/services/forwards.ts";
+import { addNote } from "../../packages/services/cases.ts";
 import { one } from "../../packages/storage/db.ts";
 import { caseByThread, closeDb, createHarness, currentDraft, seedWorkspace, syncAndDrain, type Harness } from "./harness.ts";
 
@@ -141,5 +142,78 @@ describe("forward a mail from a case", () => {
     assert.equal((await caseByThread(h, s, "fw-nomarker")).version, conv.version, "not taken for a reply written in Outlook");
     assert.equal((await currentDraft(h, s, conv.id))?.id, draftBefore?.id);
     assert.equal(((await getCase(h.ctx, s.agent, conv.id)).forwards as Array<{ state: string }>)[0]!.state, "confirmed");
+  });
+
+  it("forwards the whole case with messages, our reply, the order and the files as one mail", async () => {
+    h = await createHarness({ sendMode: "enabled" });
+    const s = await seedWorkspace(h);
+    const other = await seedWorkspace(h, "Anderer Händler");
+    h.graph.addInbound({
+      from: "kunde@example.invalid", fromName: "Kim Kunde", subject: "Teekanne kaputt, Bestellung AU-10001", body: "Die Kanne kam zerbrochen an.", conversationId: "fw-case",
+      attachments: [{ id: "c1", name: "scherben.pdf", contentType: "application/pdf", contentBytes: PDF }],
+    });
+    await syncAndDrain(h, s);
+    h.graph.addSent({ to: "kunde@example.invalid", subject: "AW: Teekanne kaputt, Bestellung AU-10001", body: "Wir schicken Ersatz.", conversationId: "fw-case" });
+    await syncAndDrain(h, s);
+    const conv = await caseByThread(h, s, "fw-case");
+    await addNote(h.ctx, s.agent, conv.id, "INTERN: Stammkunde");
+
+    await assert.rejects(forwardCase(h.ctx, s.agent, conv.id, { forwardId: randomUUID(), to: "lager@lieferant.example" }), code("SEND_BLOCKED"));
+    await setSendEnabled(h.ctx, s.owner, s.connectionId, true);
+
+    const info = await getCaseForwardInfo(h.ctx, s.agent, conv.id);
+    assert.equal(info.subject, "Fwd: Fall: Teekanne kaputt, Bestellung AU-10001");
+    assert.deepEqual(info.blockers, []);
+    assert.equal(info.contents.messages, 1);
+    assert.equal(info.contents.replies, 1);
+    assert.equal(info.contents.order, "AU-10001");
+    assert.equal(info.contents.notes, 1);
+    assert.equal(info.contents.masked, false);
+    await assert.rejects(getCaseForwardInfo(h.ctx, s.viewer, conv.id), (e: ServiceError) => e.status === 403);
+    await assert.rejects(forwardCase(h.ctx, other.owner, conv.id, { forwardId: randomUUID(), to: "x@y.example" }), code("NOT_FOUND"), "another workspace cannot forward the case");
+
+    const forwardId = randomUUID();
+    const before = h.graph.forwards.length;
+    const r = await forwardCase(h.ctx, s.agent, conv.id, { forwardId, to: "lager@lieferant.example", comment: "Bitte Ersatz schicken." });
+    assert.equal(r.state, "sent");
+    const sent = h.graph.forwards[before]!;
+    assert.equal(sent.kind, "sendMail");
+    assert.equal(sent.subject, "Fwd: Fall: Teekanne kaputt, Bestellung AU-10001");
+    assert.ok(sent.headers.some((x) => x.value === forwardId));
+    for (const part of ["Bitte Ersatz schicken.", "Die Kanne kam zerbrochen an.", "Wir schicken Ersatz.", "AU-10001", "Demo-Teekanne Glas 1,2 l", "Positionen:", "Rechnungen und Gutschriften:", "Retouren:", "kunde@example.invalid"]) {
+      assert.ok(sent.body.includes(part), `the forward contains ${part}`);
+    }
+    assert.ok(sent.body.indexOf("Die Kanne kam") < sent.body.indexOf("Wir schicken Ersatz"), "oldest first");
+    assert.ok(!sent.body.includes("Stammkunde"), "internal notes only when ticked");
+    assert.deepEqual(sent.attachments.map((a) => a.name), ["scherben.pdf"]);
+
+    // Same dialog id: sent once.
+    assert.equal((await forwardCase(h.ctx, s.agent, conv.id, { forwardId, to: "lager@lieferant.example" })).state, "sent");
+    assert.equal(h.graph.forwards.length, before + 1);
+
+    // With notes on request; the sent copies are no reply in the case.
+    await forwardCase(h.ctx, s.agent, conv.id, { forwardId: randomUUID(), to: "chef@firma.example", includeNotes: true });
+    assert.match(h.graph.forwards.at(-1)!.body, /INTERN: Stammkunde/);
+    await syncAndDrain(h, s);
+    const data = await getCase(h.ctx, s.agent, conv.id);
+    assert.equal(data.messages.length, 2, "the forwarded copies are not shown in the history");
+    const logged = data.forwards as Array<{ message_id: string | null; mode: string; state: string }>;
+    assert.deepEqual(logged.map((f) => [f.message_id, f.mode, f.state]), [[null, "case", "confirmed"], [null, "case", "confirmed"]]);
+  });
+
+  it("removes every address when forwarding a marketplace relay case", async () => {
+    h = await createHarness({ sendMode: "enabled" });
+    const s = await seedWorkspace(h);
+    await setSendEnabled(h.ctx, s.owner, s.connectionId, true);
+    const relay = `kunde-q2@${DEMO.amazonRelayDomain}`;
+    h.graph.addInbound({ from: relay, subject: "Bestellung 302-1234567-7654321", body: `Falsche Farbe. Antwort an ${relay}`, conversationId: "fw-case-relay" });
+    await syncAndDrain(h, s);
+    const conv = await caseByThread(h, s, "fw-case-relay");
+    assert.equal((await getCaseForwardInfo(h.ctx, s.agent, conv.id)).contents.masked, true);
+    assert.equal((await forwardCase(h.ctx, s.agent, conv.id, { forwardId: randomUUID(), to: "einkauf@lieferant.example" })).state, "sent");
+    const sent = h.graph.forwards.at(-1)!;
+    assert.ok(!sent.body.includes(DEMO.amazonRelayDomain), "no relay address anywhere in the case forward");
+    assert.match(sent.body, /Falsche Farbe/);
+    assert.match(sent.body, /Kunde über Amazon/);
   });
 });

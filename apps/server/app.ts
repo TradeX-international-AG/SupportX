@@ -41,7 +41,7 @@ import { ServiceError, type Actor, type AppContext } from "../../packages/servic
 import { enqueue } from "../../packages/services/jobs.ts";
 import { linkOrderManually, refreshOrderLink, setConversationAccount } from "../../packages/services/matching.ts";
 import { getMessageAttachment, listMessageAttachments } from "../../packages/services/attachments.ts";
-import { forwardMessage, getForwardInfo, resolveForward } from "../../packages/services/forwards.ts";
+import { forwardCase, forwardMessage, getCaseForwardInfo, getForwardInfo, resolveForward } from "../../packages/services/forwards.ts";
 import { attachUploadedFile, deleteDocument, getDocument, listDocuments, attachTemplate, removeWaitingFile, setDraftDocuments, uploadDocument, uploadReplyFile } from "../../packages/services/documents.ts";
 import { attachCaseInvoices, draftInvoiceReply, fetchCaseInvoices } from "../../packages/services/invoices.ts";
 import { deleteLogo, getLogo, logoVersion, previewDesign, resetDesign, saveDesign, saveLogo, workspaceTheme } from "../../packages/services/design.ts";
@@ -238,6 +238,11 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
   app.post("/api/w/:ws/messages/:id/forward", async (req) => {
     const body = parse(z.object({ forwardId: z.string().uuid(), to: z.union([z.string().max(3000), z.array(z.string().max(320)).max(20)]), comment: z.string().max(5000).optional() }), req.body);
     return forwardMessage(ctx, await actor(req), (req.params as { id: string }).id, body);
+  });
+  app.get("/api/w/:ws/cases/:id/forward", async (req) => getCaseForwardInfo(ctx, await actor(req), (req.params as { id: string }).id));
+  app.post("/api/w/:ws/cases/:id/forward", async (req) => {
+    const body = parse(z.object({ forwardId: z.string().uuid(), to: z.union([z.string().max(3000), z.array(z.string().max(320)).max(20)]), comment: z.string().max(5000).optional(), includeNotes: z.boolean().optional() }), req.body);
+    return forwardCase(ctx, await actor(req), (req.params as { id: string }).id, body);
   });
   app.post("/api/w/:ws/forwards/:id/resolve", async (req) => {
     const body = parse(z.object({ action: z.enum(["check", "was_sent", "was_not_sent"]) }), req.body);

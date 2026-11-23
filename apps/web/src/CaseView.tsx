@@ -156,6 +156,7 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
   const [editing, setEditing] = useState(false);
   // "Erledigt" asks once what was done, so a refund lands on the refund list with its amount.
   const [closing, setClosing] = useState(false);
+  const [forwardingCase, setForwardingCase] = useState(false);
   const [others, setOthers] = useState<Array<{ name: string; editing: boolean }>>([]);
   useEffect(() => {
     const beat = () => api<{ others: Array<{ name: string; editing: boolean }> }>("POST", `${base}/cases/${caseId}/presence`, { editing }).then((r) => setOthers(r.others), () => undefined);
@@ -307,6 +308,7 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
               </select>
             </label>
             {c.category === "support" && <CategoryBar category={c.category} reason={c.category_reason} sender={sender} subject={c.subject} base={base} canEdit={canEdit} onSet={setCategory} />}
+            {canEdit && <button className="ghost" onClick={() => setForwardingCase((v) => !v)} aria-expanded={forwardingCase} title="Den ganzen Fall mit allen Nachrichten, Antworten, Bestelldaten und Anhängen per E-Mail weiterleiten">Weiterleiten</button>}
           </div>
         )}
       </div>
@@ -317,6 +319,10 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
             : `${others.map((o) => o.name).join(", ")} hat diesen Fall gerade offen.`}
         </p>
       )}
+      {forwardingCase && canEdit && (
+        <ForwardBox base={base} url={`${base}/cases/${caseId}/forward`} forCase autoOpen onClose={() => setForwardingCase(false)} onDone={(note) => { setNotice(note); void load(); }} />
+      )}
+      {(data.forwards ?? []).filter((f) => f.message_id === null).map((f) => <ForwardLog key={f.id} forward={f} canEdit={canEdit} onResolve={resolveForward} />)}
       {closing && canEdit && (
         <CloseCase key={c.outcome ?? "none"} data={data} onCancel={() => setClosing(false)}
           onClose={async (outcome, note, amount) => {
@@ -574,8 +580,19 @@ function Attachments({ base, messageId }: { base: string; messageId: string }) {
   );
 }
 
-type ForwardRow = { id: string; message_id: string; recipients: string[]; comment: string; mode: "original" | "text"; state: string; attachments_included: number | null; attachments_left_out: string[]; last_error: string | null; created_at: string; created_by_name: string | null };
-type ForwardInfo = { mode: "original" | "text"; subject: string; notice: string; suggestions: string[]; blockers: string[] };
+type ForwardRow = { id: string; message_id: string | null; recipients: string[]; comment: string; mode: "original" | "text" | "case"; state: string; attachments_included: number | null; attachments_left_out: string[]; last_error: string | null; created_at: string; created_by_name: string | null };
+type ForwardInfo = { mode?: "original" | "text"; subject: string; notice: string; suggestions: string[]; blockers: string[]; contents?: CaseForwardContents };
+type CaseForwardContents = { messages: number; replies: number; order: string | null; files: number; notes: number; masked: boolean };
+
+/** "3 Kundennachrichten, 2 Antworten, Bestellung 4711, Anhänge aus 2 Nachrichten/Dateien". */
+function contentsLine(c: CaseForwardContents): string {
+  return [
+    `${c.messages} ${c.messages === 1 ? "Kundennachricht" : "Kundennachrichten"}`,
+    `${c.replies} ${c.replies === 1 ? "Antwort" : "Antworten"}`,
+    c.order ? `Bestellung ${c.order} mit Positionen, Versand, Rechnungen und Retouren` : "keine Bestellung zugeordnet",
+    c.files ? `Anhänge (${c.files} ${c.files === 1 ? "Quelle" : "Quellen"}, zusammen bis 3 MB)` : "keine Anhänge",
+  ].join(", ");
+}
 const FORWARD_STATE: Record<string, { label: string; tone: string }> = {
   sending: { label: "wird gesendet", tone: "muted" }, sent: { label: "vom Postfach angenommen", tone: "ok" }, confirmed: { label: "in Gesendete Elemente", tone: "ok" },
   uncertain: { label: "ungeklärt", tone: "bad" }, failed: { label: "nicht gesendet", tone: "bad" },
@@ -587,9 +604,10 @@ function ForwardLog({ forward: f, canEdit, onResolve }: { forward: ForwardRow; c
   return (
     <div className="forward-log small">
       <div className="row wrap">
-        <span>Weitergeleitet an {f.recipients.join(", ")} am {fmtDate(f.created_at)}{f.created_by_name ? ` von ${f.created_by_name}` : ""}</span>
+        <span>{f.mode === "case" ? "Fall weitergeleitet" : "Weitergeleitet"} an {f.recipients.join(", ")} am {fmtDate(f.created_at)}{f.created_by_name ? ` von ${f.created_by_name}` : ""}</span>
         <span className={`pill ${st.tone}`}>{st.label}</span>
         {f.mode === "text" && <span className="muted">nur Text, ohne Adressen{f.attachments_included ? `, ${f.attachments_included} Anhang/Anhänge` : ""}</span>}
+        {f.mode === "case" && <span className="muted">ganzer Fall mit Bestelldaten{f.attachments_included ? `, ${f.attachments_included} Anhang/Anhänge` : ""}</span>}
       </div>
       {f.comment && <p className="muted">Begleittext: {f.comment}</p>}
       {f.attachments_left_out.length > 0 && <p className="warn-text">Nicht mitgesendet (zu groß): {f.attachments_left_out.join(", ")}</p>}
@@ -608,9 +626,16 @@ function ForwardLog({ forward: f, canEdit, onResolve }: { forward: ForwardRow; c
 
 const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 
-/** Forward one mail: recipients, optional own text, confirm, send through the mailbox. */
-function ForwardBox({ base, messageId, onDone }: { base: string; messageId: string; onDone: (notice: string) => void }) {
+/**
+ * Forward one mail (under the mail) or the whole case (header button): recipients,
+ * optional own text, confirm, send through the mailbox.
+ */
+function ForwardBox({ base, messageId, url: givenUrl, forCase = false, autoOpen = false, onClose, onDone }: {
+  base: string; messageId?: string; url?: string; forCase?: boolean; autoOpen?: boolean; onClose?: () => void; onDone: (notice: string) => void;
+}) {
+  const url = givenUrl ?? `${base}/messages/${messageId}/forward`;
   const [open, setOpen] = useState(false);
+  const [includeNotes, setIncludeNotes] = useState(false);
   const [info, setInfo] = useState<ForwardInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [to, setTo] = useState<string[]>([]);
@@ -626,13 +651,18 @@ function ForwardBox({ base, messageId, onDone }: { base: string; messageId: stri
     setConfirming(false);
     forwardId.current = crypto.randomUUID();
     try {
-      setInfo(await api<ForwardInfo>("GET", `${base}/messages/${messageId}/forward`));
+      setInfo(await api<ForwardInfo>("GET", url));
     } catch (err) {
       setError((err as Error).message);
     }
   };
+  useEffect(() => {
+    if (autoOpen) void start();
+  }, []);
   const close = () => {
+    onClose?.();
     setOpen(false);
+    setIncludeNotes(false);
     setTo([]);
     setTyped("");
     setComment("");
@@ -649,7 +679,7 @@ function ForwardBox({ base, messageId, onDone }: { base: string; messageId: stri
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ state: string; error?: string }>("POST", `${base}/messages/${messageId}/forward`, { forwardId: forwardId.current, to, comment });
+      const r = await api<{ state: string; error?: string }>("POST", url, { forwardId: forwardId.current, to, comment, ...(forCase ? { includeNotes } : {}) });
       if (r.state === "failed") {
         setError(r.error ?? "Weiterleitung fehlgeschlagen. Es wurde nichts gesendet.");
         forwardId.current = crypto.randomUUID();
@@ -657,7 +687,7 @@ function ForwardBox({ base, messageId, onDone }: { base: string; messageId: stri
         onDone("");
         return;
       }
-      onDone(r.state === "uncertain" ? "Weiterleitung ungeklärt: bitte in „Gesendete Elemente“ prüfen." : `Weitergeleitet an ${to.join(", ")}.`);
+      onDone(r.state === "uncertain" ? "Weiterleitung ungeklärt: bitte in „Gesendete Elemente“ prüfen." : `${forCase ? "Fall weitergeleitet" : "Weitergeleitet"} an ${to.join(", ")}.`);
       close();
     } catch (err) {
       setError((err as Error).message);
@@ -669,9 +699,10 @@ function ForwardBox({ base, messageId, onDone }: { base: string; messageId: stri
   if (!open) return <div className="row"><button className="link small" onClick={() => void start()}>Weiterleiten</button></div>;
   const pending = typed.trim() !== "";
   const blocked = (info?.blockers.length ?? 0) > 0;
+  const masked = forCase ? info?.contents?.masked : info?.mode === "text";
   return (
-    <div className="forward-box">
-      <div className="row"><strong className="small">Weiterleiten</strong><button className="link small" onClick={close}>Abbrechen</button></div>
+    <div className={`forward-box${forCase ? " case-forward" : ""}`}>
+      <div className="row"><strong className="small">{forCase ? "Ganzen Fall weiterleiten" : "Weiterleiten"}</strong><button className="link small" onClick={close}>Abbrechen</button></div>
       {!info && !error && <p className="small muted">Lädt …</p>}
       {info && !confirming && (
         <>
@@ -690,7 +721,11 @@ function ForwardBox({ base, messageId, onDone }: { base: string; messageId: stri
           <label className="field"><span>Eigener Text (optional)</span>
             <textarea rows={3} value={comment} maxLength={5000} onChange={(e) => setComment(e.target.value)} placeholder="z. B. Bitte prüfen, ob die Ware so ausgeliefert wurde." />
           </label>
-          <p className={`small ${info.mode === "text" ? "warn-text" : "muted"}`}>{info.notice}</p>
+          {forCase && info.contents && <p className="small">Enthält: {contentsLine(info.contents)}.</p>}
+          {forCase && (info.contents?.notes ?? 0) > 0 && (
+            <label className="row small check"><input type="checkbox" checked={includeNotes} onChange={(e) => setIncludeNotes(e.target.checked)} /> Interne Notizen mitsenden ({info.contents!.notes})</label>
+          )}
+          <p className={`small ${masked ? "warn-text" : "muted"}`}>{info.notice}</p>
           {blocked && <p className="small error">{info.blockers.join(" ")}</p>}
           <div className="row"><button className="primary" disabled={to.length === 0 || pending || blocked} onClick={() => setConfirming(true)}>Weiter</button></div>
         </>
@@ -701,7 +736,9 @@ function ForwardBox({ base, messageId, onDone }: { base: string; messageId: stri
           <p>An: {to.join(", ")}</p>
           <p>Betreff: {info.subject}</p>
           {comment.trim() && <p>Eigener Text: {comment.trim()}</p>}
-          <p className={info.mode === "text" ? "warn-text" : "muted"}>{info.mode === "text" ? "Nur der Text ohne E-Mail-Adressen, Anhänge bis 3 MB." : "Die Original-Mail mit Absender und Anhängen."}</p>
+          {forCase
+            ? <p className={masked ? "warn-text" : "muted"}>{info.contents ? `${contentsLine(info.contents)}${includeNotes ? ", mit internen Notizen" : ""}.` : ""}{masked ? " Ohne E-Mail-Adressen." : ""}</p>
+            : <p className={info.mode === "text" ? "warn-text" : "muted"}>{info.mode === "text" ? "Nur der Text ohne E-Mail-Adressen, Anhänge bis 3 MB." : "Die Original-Mail mit Absender und Anhängen."}</p>}
           <div className="row"><button onClick={() => setConfirming(false)} disabled={busy}>Zurück</button><button className="primary" onClick={() => void send()} disabled={busy}>{busy ? "Wird gesendet …" : "Jetzt weiterleiten"}</button></div>
         </div>
       )}
