@@ -123,6 +123,14 @@ Credential replacement behavior must be checked against the operator's account b
 
 Implementation note (2026-10-21): the official specification URL was not reachable from the build environment. Field names used by the adapter (`salesOrder.orderNumberAtCustomer`, `ecommerceOrder.ecommerceId`, `shipment.mainSalesOrderId`, `shipment.parcels[].trackingId/trackingUrl`, deprecated `packageTrackingNumber/Url`, `salesInvoice.salesOrderId`, `<field>-eq` filters, `{ result: [...] }` envelope) were taken from documentation generated from the v2 OpenAPI file in a third-party SDK (github.com/kruegge82/weclapp-php-sdk, secondary source). **They must be confirmed against the operator's tenant** with `Verbindung prüfen` and one real order before relying on the matching.
 
+## plentymarkets
+
+| ID | Source | Evidence used |
+| --- | --- | --- |
+| PM-1 | [PlentyONE order search guide](https://developers.plentyone.com/en-gb/developers/main/rest-api-guides/order-search.html) | Order by id `GET /rest/orders/{id}`, search filters, `with` relations, order fields (`typeId` 1 = sales order, `relations` with `referenceType`/`relation` = contact/receiver, order item `typeId` 6 = shipping costs, `statusName`). Checked 2026-11-23. |
+| PM-2 | [PlentyONE REST reference](https://developers.plentyone.com/en-gb/plentymarkets-rest-api/index.html) | `externalOrderId` filter, relations `documents`/`shippingPackages`/`tags`, `/rest/orders/statuses`, `/rest/orders/{id}/packagenumbers`. The page renders with JavaScript and could not be read from the build environment; these names are unconfirmed and every one is optional in the adapter. |
+| PM-3 | ASEIO plenty connection (own code, reads real plenty systems) | `POST /rest/login` with `access_token`/`expires_in`, `GET /rest/orders` with embedded `orderItems` and `amounts` (unit prices), property type 7 = external order number, plenty ignores unknown query parameters, fixed status ranges, `/rest/orders/referrers`, `X-Plenty-*-Calls-Left` limits. |
+
 ## AI and MCP
 
 | ID | Source | Evidence used |

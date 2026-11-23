@@ -30,8 +30,8 @@ async function storeLink(
   await tx.query("UPDATE order_links SET is_current = false WHERE workspace_id = $1 AND conversation_id = $2 AND is_current", [conv.workspace_id, conv.id]);
   const unique = result?.status === "unique" ? result : null;
   await tx.query(
-    `INSERT INTO order_links (workspace_id, conversation_id, merchant_account_id, status, references_tried, candidates, external_order_id, matched_by, linked_by, linked_by_user_id, error, snapshot, retrieved_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    `INSERT INTO order_links (workspace_id, conversation_id, merchant_account_id, status, references_tried, candidates, external_order_id, matched_by, linked_by, linked_by_user_id, error, snapshot, retrieved_at, provider)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
     [
       conv.workspace_id, conv.id, conv.merchant_account_id, status, JSON.stringify(refs),
       JSON.stringify(result?.status === "ambiguous" ? result.candidates : []),
@@ -39,6 +39,7 @@ async function storeLink(
       result?.status === "error" ? result.error : result?.status === "missing" && result.rejectedFilters?.length ? `weclapp kennt einen Suchfilter nicht (${result.rejectedFilters.join(", ")}), dort wurde nicht gesucht.`
         : result?.status === "missing" && result.outOfScopeMatches ? `${result.outOfScopeMatches} Treffer gehören zu einem anderen Verkäuferkonto.` : null,
       unique ? JSON.stringify(unique.order) : null, unique ? unique.order.retrievedAt : null,
+      unique?.order.provider ?? "weclapp",
     ],
   );
   // Changed order evidence makes earlier approvals stale.

@@ -38,7 +38,7 @@ export interface SetupInput {
   accounts: ReadonlyArray<{ platform: string; paused: boolean }>;
   rules: ReadonlyArray<{ connection_id: string; source_platform: string }>;
   routes: ReadonlyArray<{ connection_id: string; source_platform: string }>;
-  erp: null | { has_secret: boolean; status: string; last_error: string | null };
+  erp: null | { provider?: string; has_secret: boolean; status: string; last_error: string | null };
   /** Owner tick-offs for external steps, by platform. */
   confirmations?: Readonly<Record<string, { at: string; by: string | null }>>;
   /** The installation brings its own eBay keyset: the merchant only signs in at eBay. */
@@ -116,12 +116,35 @@ export function microsoftSetup(input: SetupInput): ChannelSetup {
   return finish("microsoft", "Microsoft-Postfach", "Grundlage für Amazon, DocMorris und Shopify", steps, graph.some(healthy), err);
 }
 
+/** The stored order system, if it is this one (rows without provider are weclapp). */
+function erpOf(input: SetupInput, provider: "weclapp" | "plentymarkets") {
+  return input.erp && (input.erp.provider ?? "weclapp") === provider ? input.erp : null;
+}
+
 export function weclappSetup(input: SetupInput): ChannelSetup {
+  const erp = erpOf(input, "weclapp");
   const steps: SetupStep[] = [
-    { key: "erp", title: "Adresse und API-Token eintragen", hint: "Eigener weclapp-Benutzer nur mit Leserechten, nicht der Token eines anderen Programms.", done: !!input.erp?.has_secret, action: "erp" },
-    { key: "check", title: "Verbindung testen", done: input.erp?.status === "ok", action: "check" },
+    { key: "erp", title: "Adresse und API-Token eintragen", hint: "Eigener weclapp-Benutzer nur mit Leserechten, nicht der Token eines anderen Programms.", done: !!erp?.has_secret, action: "erp" },
+    { key: "check", title: "Verbindung testen", done: erp?.status === "ok", action: "check" },
   ];
-  return finish("weclapp", "weclapp", "Bestelldaten, nur lesend", steps, input.erp?.status === "ok", input.erp?.status === "error" ? input.erp.last_error : null);
+  return finish("weclapp", "weclapp", "Bestelldaten, nur lesend", steps, erp?.status === "ok", erp?.status === "error" ? erp.last_error : null);
+}
+
+export function plentySetup(input: SetupInput): ChannelSetup {
+  const erp = erpOf(input, "plentymarkets");
+  const steps: SetupStep[] = [
+    { key: "erp", title: "Adresse, REST-Benutzer und Passwort eintragen", hint: "Eigener REST-Benutzer in plentymarkets, der Aufträge lesen darf. Nicht der Zugang eines anderen Programms.", done: !!erp?.has_secret, action: "erp" },
+    { key: "check", title: "Verbindung testen", done: erp?.status === "ok", action: "check" },
+  ];
+  return finish("plentymarkets", "plentymarkets", "Bestelldaten, nur lesend", steps, erp?.status === "ok", erp?.status === "error" ? erp.last_error : null);
+}
+
+/** The order system cards to show: both while none is connected, else only the connected one. */
+export function erpSetups(input: SetupInput): ChannelSetup[] {
+  const provider = input.erp ? input.erp.provider ?? "weclapp" : null;
+  if (provider === "plentymarkets") return [plentySetup(input)];
+  if (provider === "weclapp") return [weclappSetup(input)];
+  return [weclappSetup(input), plentySetup(input)];
 }
 
 export function marketSetup(market: Market, input: SetupInput): ChannelSetup {

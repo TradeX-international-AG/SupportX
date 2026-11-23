@@ -429,3 +429,72 @@ export function signEbayNotice(body: string, kid = "kid-1") {
   const pem = publicKey.export({ type: "spki", format: "pem" }).toString().replace(/\n/g, "");
   return { header, key: { algorithm: "ECDSA", digest: "SHA1", key: pem } };
 }
+
+export interface FakePlenty {
+  baseUrl: string;
+  /** Orders by id, with embedded orderItems, properties, relations, documents, shippingPackages, tags. */
+  orders: Map<string, Record<string, unknown>>;
+  /** Refuse `with[]` relations (HTTP 400) like a system without them. */
+  refuseRelations: boolean;
+  requests: string[];
+  logins: number;
+  close(): Promise<void>;
+}
+
+/**
+ * plentymarkets REST double: POST /rest/login, GET /rest/orders (ignores unknown
+ * filters like plenty: externalOrderId filters only when known), /rest/orders/{id},
+ * /rest/orders/statuses, /rest/orders/referrers, /rest/orders/{id}/packagenumbers.
+ */
+export async function startFakePlenty(opts: { username: string; password: string; ignoreExternalFilter?: boolean }): Promise<FakePlenty> {
+  const orders: FakePlenty["orders"] = new Map();
+  const requests: string[] = [];
+  const token = "plenty-token-1";
+  const state = { logins: 0, refuseRelations: false };
+  const server = createServer(async (req, res) => {
+    const body = (await readBody(req)).toString("utf8");
+    const url = new URL(req.url ?? "/", "http://x");
+    requests.push(`${req.method} ${url.pathname}${url.search}`);
+    if (req.method === "POST" && url.pathname === "/rest/login") {
+      const creds = JSON.parse(body || "{}") as { username?: string; password?: string };
+      if (creds.username !== opts.username || creds.password !== opts.password) return json(res, 401, { error: "invalid_credentials", message: "Invalid credentials" });
+      state.logins++;
+      return json(res, 200, { token_type: "Bearer", expires_in: 86400, access_token: token, refresh_token: "r" });
+    }
+    if (req.headers.authorization !== `Bearer ${token}`) return json(res, 401, { error: "Unauthenticated." });
+    if (req.method !== "GET") return json(res, 405, { error: "method" });
+    if (url.pathname === "/rest/orders") {
+      const external = url.searchParams.get("externalOrderId");
+      const all = [...orders.values()];
+      const rows = external && !opts.ignoreExternalFilter
+        ? all.filter((o) => ((o.properties as Array<{ typeId: number; value: string }> | undefined) ?? []).some((p) => p.typeId === 7 && p.value === external))
+        : all;
+      return json(res, 200, { page: 1, totalsCount: rows.length, isLastPage: true, entries: rows.slice(0, Number(url.searchParams.get("itemsPerPage") ?? 50)) });
+    }
+    if (url.pathname === "/rest/orders/statuses") return json(res, 200, { entries: [{ statusId: 7, names: { de: "Warenausgang gebucht" } }, { statusId: 5.1, names: { de: "Wartet auf Lager" } }] });
+    if (url.pathname === "/rest/orders/referrers") return json(res, 200, [{ id: 0, name: "Mandant (Shop)" }, { id: 4.01, name: "Amazon Deutschland" }]);
+    const pkg = /^\/rest\/orders\/(\d+)\/packagenumbers$/.exec(url.pathname);
+    if (pkg) {
+      const o = orders.get(pkg[1]!);
+      return o ? json(res, 200, (o.packageNumbers as string[] | undefined) ?? []) : json(res, 404, { error: "not found" });
+    }
+    const one = /^\/rest\/orders\/(\d+)$/.exec(url.pathname);
+    if (one) {
+      const withs = url.searchParams.getAll("with[]");
+      if (withs.length && state.refuseRelations) return json(res, 400, { error: "Unknown relation" });
+      const o = orders.get(one[1]!);
+      if (!o) return json(res, 404, { error: "Order not found" });
+      const { relations, documents, shippingPackages, tags, packageNumbers: _p, ...plain } = o;
+      return json(res, 200, { ...plain, ...(withs.includes("relations") ? { relations } : {}), ...(withs.includes("documents") ? { documents } : {}), ...(withs.includes("shippingPackages") ? { shippingPackages } : {}), ...(withs.includes("tags") ? { tags } : {}) });
+    }
+    return json(res, 404, { error: "unknown endpoint" });
+  });
+  const baseUrl = await listen(server);
+  return {
+    baseUrl, orders, requests,
+    get logins() { return state.logins; },
+    get refuseRelations() { return state.refuseRelations; },
+    set refuseRelations(v: boolean) { state.refuseRelations = v; },
+    close: () => close(server),
+  };
+}

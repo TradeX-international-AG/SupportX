@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { CategoryRule } from "../core/category.ts";
-import type { MessageChannel, OrderProvider, OrderScopeRule, SourcePlatform } from "../core/contracts.ts";
+import { erpName, type ErpProvider, type MessageChannel, type OrderProvider, type OrderScopeRule, type SourcePlatform } from "../core/contracts.ts";
 import type { RoutingRule } from "../core/classify.ts";
 import { EbayMessageChannel } from "../connectors/ebay/message-channel.ts";
 import { buildEbayAuthorizeUrl, ebayHosts, exchangeEbayCode, fetchEbayUsername, isOfficialEbayHost, type EbayApp } from "../connectors/ebay/oauth.ts";
@@ -9,6 +9,7 @@ import { KauflandTicketsChannel } from "../connectors/kaufland/tickets-channel.t
 import { GraphMailChannel } from "../connectors/microsoft/graph-mail.ts";
 import { isOfficialMiraklHost, MiraklInboxChannel } from "../connectors/mirakl/inbox-channel.ts";
 import { validateWeclappBaseUrl, WeclappOrderProvider } from "../connectors/weclapp/adapter.ts";
+import { PLENTY_SEARCH_FIELDS, PlentyOrderProvider, validatePlentyBaseUrl } from "../connectors/plentymarkets/adapter.ts";
 import { ALL_PLATFORMS, isMiraklPlatform, PLATFORM_NAMES } from "../core/marketplaces.ts";
 import { operatorEbayApp } from "../storage/config.ts";
 import { many, one, withTx, type Queryable } from "../storage/db.ts";
@@ -128,9 +129,11 @@ export function ebayApp(row: Pick<ChannelConnectionRow, "config">, secret: EbayS
 export interface ErpConnectionRow {
   id: string;
   workspace_id: string;
-  provider: "weclapp";
+  provider: ErpProvider;
   display_name: string;
   base_url: string;
+  /** plentymarkets REST user (not secret); null for weclapp. */
+  username?: string | null;
   search_fields: string[];
   secret_id: string | null;
   status: string;
@@ -194,11 +197,23 @@ export function buildChannel(row: ChannelConnectionRow, secret: string, opts: { 
   }
 }
 
+interface PlentySecret {
+  password: string;
+}
+
+/** Builds the order system adapter for the stored ERP connection. Shared by the default and the test factories. */
+export function buildOrderProvider(row: ErpConnectionRow, secret: string, opts: { allowTestEndpoints: boolean; fetchImpl?: typeof fetch }): OrderProvider {
+  if (row.provider === "plentymarkets") {
+    const s = parseSecret<PlentySecret>(secret, "plentymarkets");
+    return new PlentyOrderProvider({ baseUrl: row.base_url, username: row.username ?? "", password: s.password ?? "", searchFields: row.search_fields, allowTestEndpoints: opts.allowTestEndpoints, fetchImpl: opts.fetchImpl });
+  }
+  return new WeclappOrderProvider({ baseUrl: row.base_url, apiToken: secret, searchFields: row.search_fields, allowTestEndpoints: opts.allowTestEndpoints, fetchImpl: opts.fetchImpl });
+}
+
 export function defaultConnectorFactory(allowTestEndpoints: boolean, ebayOperator: OperatorEbayApp | null = null): ConnectorFactory {
   return {
     channel: (row, secret) => buildChannel(row, secret, { allowTestEndpoints, ebayOperator }),
-    orders: (row, secret) =>
-      new WeclappOrderProvider({ baseUrl: row.base_url, apiToken: secret, searchFields: row.search_fields, allowTestEndpoints }),
+    orders: (row, secret) => buildOrderProvider(row, secret, { allowTestEndpoints }),
   };
 }
 
@@ -220,11 +235,11 @@ export async function channelFor(ctx: AppContext, q: Queryable, row: ChannelConn
 }
 
 export async function loadErpConnection(q: Queryable, workspaceId: string): Promise<ErpConnectionRow | null> {
-  return one<ErpConnectionRow>(q, "SELECT * FROM erp_connections WHERE workspace_id = $1 AND provider = 'weclapp'", [workspaceId]);
+  return one<ErpConnectionRow>(q, "SELECT * FROM erp_connections WHERE workspace_id = $1", [workspaceId]);
 }
 
 export async function orderProviderFor(ctx: AppContext, q: Queryable, row: ErpConnectionRow): Promise<OrderProvider> {
-  if (!row.secret_id) throw new ServiceError(409, "NO_CREDENTIALS", "Für die weclapp-Verbindung ist kein API-Token hinterlegt.");
+  if (!row.secret_id) throw new ServiceError(409, "NO_CREDENTIALS", `Für die ${erpName(row.provider)}-Verbindung sind keine Zugangsdaten hinterlegt.`);
   return ctx.connectors.orders(row, await ctx.secrets.read(q, row.workspace_id, row.secret_id));
 }
 
@@ -270,6 +285,57 @@ export async function createMerchantAccount(ctx: AppContext, actor: Actor, input
   });
 }
 
+/** One order system per workspace: switching means removing the other one first. */
+function assertSameErp(existing: ErpConnectionRow | null, provider: ErpProvider): void {
+  if (existing && existing.provider !== provider) {
+    throw new ServiceError(409, "OTHER_ERP", `Dieser Arbeitsbereich ist mit ${erpName(existing.provider)} verbunden. Bitte zuerst diese Verbindung entfernen.`);
+  }
+}
+
+export async function upsertPlentyConnection(ctx: AppContext, actor: Actor, input: { baseUrl: string; username: string; password?: string; searchFields?: string[] }): Promise<string> {
+  requireRole(actor, ["owner"]);
+  let baseUrl: string;
+  try {
+    baseUrl = validatePlentyBaseUrl(input.baseUrl, ctx.config.ALLOW_TEST_ENDPOINTS);
+  } catch (error) {
+    throw new ServiceError(400, "INVALID_URL", (error as Error).message);
+  }
+  const username = input.username.trim();
+  if (!username) throw new ServiceError(400, "INVALID", "Benutzername fehlt.");
+  const searchFields = input.searchFields?.length ? input.searchFields : [...PLENTY_SEARCH_FIELDS];
+  if (searchFields.some((f) => !(PLENTY_SEARCH_FIELDS as ReadonlyArray<string>).includes(f))) throw new ServiceError(400, "INVALID", "Unbekanntes Suchfeld.");
+  return withTx(ctx.db, async (tx) => {
+    const existing = await loadErpConnection(tx, actor.workspaceId);
+    assertSameErp(existing, "plentymarkets");
+    if (!existing && !input.password) throw new ServiceError(400, "INVALID", "Passwort fehlt.");
+    // A new user name without a new password would send the old password to another user.
+    if (existing && existing.username !== username && !input.password) throw new ServiceError(400, "INVALID", "Für einen anderen Benutzer bitte auch das Passwort eingeben.");
+    const secretId = input.password ? await ctx.secrets.store(tx, actor.workspaceId, "plentymarkets_login", JSON.stringify({ password: input.password })) : existing!.secret_id;
+    const row = await one<{ id: string }>(
+      tx,
+      `INSERT INTO erp_connections (workspace_id, provider, display_name, base_url, username, search_fields, secret_id)
+       VALUES ($1, 'plentymarkets', 'plentymarkets', $2, $3, $4, $5)
+       ON CONFLICT (workspace_id, provider) DO UPDATE SET base_url = EXCLUDED.base_url, username = EXCLUDED.username, search_fields = EXCLUDED.search_fields, secret_id = EXCLUDED.secret_id, status = 'configured', last_error = NULL, last_checked_at = NULL
+       RETURNING id`,
+      [actor.workspaceId, baseUrl, username, searchFields, secretId],
+    );
+    await audit(tx, actor, "erp_connection.saved", "erp_connection", row!.id, { provider: "plentymarkets", baseUrl, passwordReplaced: !!input.password });
+    return row!.id;
+  });
+}
+
+/** Removes the order system connection (and its stored credentials). Cases keep their order snapshots. */
+export async function deleteErpConnection(ctx: AppContext, actor: Actor): Promise<void> {
+  requireRole(actor, ["owner"]);
+  await withTx(ctx.db, async (tx) => {
+    const row = await loadErpConnection(tx, actor.workspaceId);
+    if (!row) throw new ServiceError(404, "NOT_FOUND", "Kein Warenwirtschaftssystem verbunden.");
+    await tx.query("DELETE FROM erp_connections WHERE workspace_id = $1 AND id = $2", [actor.workspaceId, row.id]);
+    if (row.secret_id) await tx.query("DELETE FROM secrets WHERE workspace_id = $1 AND id = $2", [actor.workspaceId, row.secret_id]);
+    await audit(tx, actor, "erp_connection.deleted", "erp_connection", row.id, { provider: row.provider });
+  });
+}
+
 export async function upsertWeclappConnection(ctx: AppContext, actor: Actor, input: { baseUrl: string; apiToken?: string; searchFields?: string[] }): Promise<string> {
   requireRole(actor, ["owner"]);
   let baseUrl: string;
@@ -281,6 +347,7 @@ export async function upsertWeclappConnection(ctx: AppContext, actor: Actor, inp
   const searchFields = input.searchFields?.length ? input.searchFields : ["orderNumberAtCustomer", "orderNumber"];
   return withTx(ctx.db, async (tx) => {
     const existing = await loadErpConnection(tx, actor.workspaceId);
+    assertSameErp(existing, "weclapp");
     if (!existing && !input.apiToken) throw new ServiceError(400, "INVALID", "API-Token fehlt.");
     // Store a token the operator created for this purpose. This application never
     // generates or rotates weclapp tokens (rotation can break other integrations).
@@ -742,7 +809,7 @@ export async function checkChannel(ctx: AppContext, actor: Actor, connectionId: 
 export async function checkErp(ctx: AppContext, actor: Actor): Promise<{ ok: boolean; detail: string }> {
   requireRole(actor, ["owner"]);
   const row = await loadErpConnection(ctx.db, actor.workspaceId);
-  if (!row) throw new ServiceError(404, "NOT_FOUND", "Keine weclapp-Verbindung konfiguriert.");
+  if (!row) throw new ServiceError(404, "NOT_FOUND", "Kein Warenwirtschaftssystem verbunden.");
   const result = await (await orderProviderFor(ctx, ctx.db, row)).checkAccess();
   await ctx.db.query("UPDATE erp_connections SET status = $2, last_error = $3, last_checked_at = now() WHERE id = $1", [row.id, result.ok ? "ok" : "error", result.ok ? null : result.detail]);
   return result;

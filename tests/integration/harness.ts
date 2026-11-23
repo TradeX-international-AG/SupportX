@@ -1,9 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { GraphMailChannel } from "../../packages/connectors/microsoft/graph-mail.ts";
-import { WeclappOrderProvider } from "../../packages/connectors/weclapp/adapter.ts";
 import { createUser } from "../../packages/services/auth.ts";
 import { createContext } from "../../packages/services/bootstrap.ts";
-import { addRoutingRule, buildChannel, createGraphConnection, createMerchantAccount, upsertWeclappConnection, type ConnectorFactory } from "../../packages/services/connections.ts";
+import { addRoutingRule, buildChannel, buildOrderProvider, createGraphConnection, createMerchantAccount, upsertWeclappConnection, type ConnectorFactory } from "../../packages/services/connections.ts";
 import type { Actor, AppContext } from "../../packages/services/context.ts";
 import { enqueue } from "../../packages/services/jobs.ts";
 import { drainJobs } from "../../packages/services/worker.ts";
@@ -57,7 +56,7 @@ export async function createHarness(opts: { sendMode?: "drafts_only" | "enabled"
         tenantId: row.config.tenantId, clientId: row.config.clientId, clientSecret: secret, mailbox: row.config.mailbox, ownAddresses: row.config.ownAddresses,
         graphBaseUrl: row.config.graphBaseUrl, authorityHost: row.config.authorityHost, allowTestEndpoints: true, timeoutMs: opts.graphTimeoutMs ?? 2000,
       }),
-    orders: (row, secret) => new WeclappOrderProvider({ baseUrl: row.base_url, apiToken: secret, searchFields: row.search_fields, allowTestEndpoints: true }),
+    orders: (row, secret) => buildOrderProvider(row, secret, { allowTestEndpoints: true }),
   };
   const ctx = createContext(config, { db, connectors });
   return { ctx, weclapp, graph, close: async () => { await weclapp.close(); await graph.close(); } };

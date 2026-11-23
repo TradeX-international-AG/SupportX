@@ -1,5 +1,5 @@
 import { trackingHref } from "./tracking.ts";
-import type { AllowedFact, OrderRecord, ShipmentFact } from "./contracts.ts";
+import { erpName, type AllowedFact, type OrderRecord, type ShipmentFact } from "./contracts.ts";
 import { RETURN_STATUS_DE, receivedAt } from "./returns.ts";
 
 const SHIPMENT_STATUS_DE: Readonly<Record<string, string>> = {
@@ -29,12 +29,12 @@ function shipmentLabel(shipment: ShipmentFact, index: number): string {
  * Customer addresses and payment data are deliberately not included.
  */
 export function buildOrderFacts(order: OrderRecord): AllowedFact[] {
-  const source = "weclapp";
+  const source = erpName(order.provider);
   const observedAt = order.retrievedAt;
   const facts: AllowedFact[] = [];
   const number = order.orderNumberAtCustomer
-    ? `${order.orderNumberAtCustomer} (weclapp-Auftrag ${order.orderNumber ?? order.id})`
-    : `weclapp-Auftrag ${order.orderNumber ?? order.id}`;
+    ? `${order.orderNumberAtCustomer} (${source}-Auftrag ${order.orderNumber ?? order.id})`
+    : `${source}-Auftrag ${order.orderNumber ?? order.id}`;
   facts.push({ id: "order", text: `Bestellung ${number}, Bestelldatum ${day(order.orderDate)}, Auftragsstatus im ERP: ${order.status ?? "unbekannt"}.`, source, observedAt });
   order.lines.forEach((line, i) => {
     const shipped = line.shippedQuantity !== undefined ? `, davon laut ERP versendet: ${line.shippedQuantity}` : "";

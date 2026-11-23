@@ -9,7 +9,7 @@ import { SNIPPET_PLACEHOLDERS } from "../../../packages/core/snippet-placeholder
 import { DEFAULT_SETTINGS_TAB, parseSettingsTab, SETTINGS_TABS, settingsHash, tabAlerts, type SettingsTab } from "./settings-tabs.ts";
 import { ALL_PLATFORMS } from "../../../packages/core/marketplaces.ts";
 import { OttoApiSection } from "./OttoApi.tsx";
-import { API_MARKETS, isMiraklMarket, MAIL_MARKETS, marketConnections, marketSetup, microsoftSetup, weclappSetup, type ChannelSetup, type StepAction } from "./setup-steps.ts";
+import { API_MARKETS, isMiraklMarket, MAIL_MARKETS, marketConnections, marketSetup, microsoftSetup, plentySetup, weclappSetup, erpSetups, type ChannelSetup, type StepAction } from "./setup-steps.ts";
 
 type Role = "owner" | "agent" | "viewer";
 interface Account { id: string; name: string; platform: string; order_scope_field: string; order_scope_value: string; paused: boolean }
@@ -29,7 +29,7 @@ interface Descriptor { platform: string; label: string; transport: string; imple
 interface SettingsData {
   workspace: { name: string; auto_invoice?: "off" | "draft" | "send"; reply_signature: string; reply_tone: string; allowed_link_prefixes: string[]; ai_enabled: boolean; has_ai_key: boolean; ai_key_hint: string | null; setup_confirmations: Record<string, { at: string; by: string | null }>; reply_deadlines?: Record<string, number>; automations?: Record<string, { mode: "off" | "draft" | "send"; since: string | null }> };
   accounts: Account[]; connections: Connection[]; rules: Rule[]; routes: Route[];
-  erp: null | { base_url: string; search_fields: string[]; has_secret: boolean; status: string; last_checked_at: string | null; last_error: string | null; credit_notes_enabled?: boolean };
+  erp: null | { provider?: "weclapp" | "plentymarkets"; username?: string | null; base_url: string; search_fields: string[]; has_secret: boolean; status: string; last_checked_at: string | null; last_error: string | null; credit_notes_enabled?: boolean };
   categoryRules: Array<{ id: string; match_type: string; pattern: string; category: "support" | "info"; hits: number; last_hit_at: string | null }>;
   jobs: Array<{ type: string; status: string; count: number; last_error: string | null }>;
   catalog: Descriptor[]; ai: { provider: string; model: string; promptVersion: string }; sendMode: string; demoMode: boolean; ebayOperatorApp?: boolean;
@@ -92,11 +92,17 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
 
   const setupInput = { ...data, confirmations: data.workspace.setup_confirmations };
   const alerts = tabAlerts({
-    anbindungen: [microsoftSetup(data), weclappSetup(data)],
+    anbindungen: [microsoftSetup(data), ...erpSetups(data)],
     marktplaetze: [...API_MARKETS, ...MAIL_MARKETS].map((m) => marketSetup(m, setupInput)),
   });
   const mailboxCount = (c: Connection) => (c.kind === "microsoft_graph" ? data.connections.filter((x) => x.kind === "microsoft_graph" && x.config.mailbox === c.config.mailbox).length : 1);
   const closePanel = () => setPanel(null);
+  const erpProvider = data.erp ? data.erp.provider ?? "weclapp" : null;
+  const weclappErp = erpProvider === "weclapp" ? data.erp : null;
+  const plentyErp = erpProvider === "plentymarkets" ? data.erp : null;
+  const removeErp = owner && data.erp ? (
+    <button className="danger" onClick={() => { if (window.confirm(`Verbindung zu ${erpProvider} entfernen? Neue Fälle finden dann keine Bestellung mehr, bis wieder ein System verbunden ist. Bereits zugeordnete Bestellungen bleiben im Fall.`)) void act(() => api("DELETE", `${base}/erp`), () => "Verbindung entfernt."); }}>Entfernen</button>
+  ) : null;
   const checkFirst = (kind: string) => {
     const c = data.connections.find((x) => x.kind === kind);
     if (c) void act(() => api("POST", `${base}/connections/${c.id}/check`), checkResult);
@@ -138,20 +144,20 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
         {owner && panel?.card === "microsoft" && panel.action === "connect" && <GraphForm onCancel={closePanel} onSubmit={(body) => { closePanel(); void act(() => api("POST", `${base}/connections`, body), () => "Postfach verbunden. Die ersten Mails kommen in wenigen Minuten."); }} />}
       </SetupCard>
 
-      <SetupCard setup={weclappSetup(data)} owner={owner} onAction={(a) => a === "check" ? void act(() => api("POST", `${base}/erp/check`), checkResult) : setPanel({ card: "weclapp", action: a })}>
-        {data.erp && (
+      {erpProvider !== "plentymarkets" && <SetupCard setup={weclappSetup(data)} owner={owner} onAction={(a) => a === "check" ? void act(() => api("POST", `${base}/erp/check`), checkResult) : setPanel({ card: "weclapp", action: a })}>
+        {weclappErp && (
           <div className="facts">
-            <div className="kv"><span>Adresse</span><code>{data.erp.base_url}</code></div>
-            <div className="kv"><span>Zugang</span><span>{data.erp.has_secret ? "Token hinterlegt" : "Token fehlt"}{data.erp.last_checked_at ? ` · geprüft ${fmtDate(data.erp.last_checked_at)}` : ""}</span></div>
-            <div className="kv"><span>Gesucht wird in</span><span>{data.erp.search_fields.join(", ")}</span></div>
+            <div className="kv"><span>Adresse</span><code>{weclappErp.base_url}</code></div>
+            <div className="kv"><span>Zugang</span><span>{weclappErp.has_secret ? "Token hinterlegt" : "Token fehlt"}{weclappErp.last_checked_at ? ` · geprüft ${fmtDate(weclappErp.last_checked_at)}` : ""}</span></div>
+            <div className="kv"><span>Gesucht wird in</span><span>{weclappErp.search_fields.join(", ")}</span></div>
           </div>
         )}
-        {owner && (panel?.card === "weclapp" || !data.erp) && <ErpForm current={data.erp?.base_url ?? ""} onSubmit={(body) => { closePanel(); void act(() => api("PUT", `${base}/erp`, body), () => "weclapp gespeichert. Bitte einmal „Verbindung testen“."); }} />}
-        {owner && data.erp && panel?.card !== "weclapp" && <div className="row"><button onClick={() => setPanel({ card: "weclapp", action: "erp" })}>Adresse oder Token ändern</button></div>}
-        {data.erp && (
+        {owner && (panel?.card === "weclapp" || !data.erp) && <ErpForm current={weclappErp?.base_url ?? ""} onSubmit={(body) => { closePanel(); void act(() => api("PUT", `${base}/erp`, body), () => "weclapp gespeichert. Bitte einmal „Verbindung testen“."); }} />}
+        {owner && weclappErp && panel?.card !== "weclapp" && <div className="row"><button onClick={() => setPanel({ card: "weclapp", action: "erp" })}>Adresse oder Token ändern</button>{removeErp}</div>}
+        {weclappErp && (
           <div className="stack">
             <label className="row small">
-              <input type="checkbox" checked={!!data.erp.credit_notes_enabled} disabled={!owner}
+              <input type="checkbox" checked={!!weclappErp.credit_notes_enabled} disabled={!owner}
                 onChange={(e) => {
                   const on = e.target.checked;
                   if (on && !window.confirm("Gutschriften aus dem Fall freischalten? Dann kann jede Person mit Bearbeiten-Recht im Fall eine Gutschrift als Entwurf in weclapp anlegen, immer mit Bestätigung. Gebucht wird weiter in weclapp.")) return;
@@ -162,7 +168,22 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
             <span className="muted small">SupportX legt die Gutschrift zur Rechnung in weclapp an (Status „Neu“, nicht gebucht), mit den Beträgen aus der Erstattung. Der weclapp-Benutzer des API-Tokens braucht dafür das Recht, Ausgangsrechnungen anzulegen und zu ändern.</span>
           </div>
         )}
-      </SetupCard>
+      </SetupCard>}
+
+      {erpProvider !== "weclapp" && <SetupCard setup={plentySetup(data)} owner={owner} onAction={(a) => a === "check" ? void act(() => api("POST", `${base}/erp/check`), checkResult) : setPanel({ card: "plentymarkets", action: a })}>
+        {plentyErp && (
+          <div className="facts">
+            <div className="kv"><span>Adresse</span><code>{plentyErp.base_url}</code></div>
+            <div className="kv"><span>REST-Benutzer</span><code>{plentyErp.username ?? ""}</code></div>
+            <div className="kv"><span>Zugang</span><span>{plentyErp.has_secret ? "Passwort hinterlegt (verdeckt)" : "Passwort fehlt"}{plentyErp.last_checked_at ? ` · geprüft ${fmtDate(plentyErp.last_checked_at)}` : ""}</span></div>
+            <div className="kv"><span>Gesucht wird nach</span><span>{plentyErp.search_fields.map((f) => (f === "externalOrderId" ? "Marktplatz-Bestellnummer" : "plenty-Auftrags-ID")).join(", ")}</span></div>
+          </div>
+        )}
+        {owner && panel?.card === "plentymarkets" && <PlentyForm current={plentyErp} onCancel={plentyErp ? closePanel : undefined} onSubmit={(body) => { closePanel(); void act(() => api("PUT", `${base}/erp/plentymarkets`, body), () => "plentymarkets gespeichert. Bitte einmal „Verbindung testen“."); }} />}
+        {owner && plentyErp && panel?.card !== "plentymarkets" && <div className="row"><button onClick={() => setPanel({ card: "plentymarkets", action: "erp" })}>Ändern</button>{removeErp}</div>}
+        {!data.erp && <p className="muted small">Es wird genau ein Warenwirtschaftssystem verbunden: weclapp oder plentymarkets.</p>}
+        {plentyErp && <p className="muted small">Gutschriften, Rechnungs-PDFs und Retouren liest SupportX bisher nur aus weclapp. Aus plentymarkets kommen Auftrag, Status, Positionen, Paketnummern und Rechnungsnummern.</p>}
+      </SetupCard>}
 
       <DhlTrackingCard base={base} owner={owner} />
       <PhoneHotlineCard base={base} owner={owner} />
@@ -672,6 +693,25 @@ function ErpForm({ current, onSubmit }: { current: string; onSubmit: (body: unkn
       <input placeholder="https://<mandant>.weclapp.com/webapp/api/v2" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} required size={40} />
       <input type="password" placeholder={current ? "Token (leer = unverändert)" : "API-Token"} value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" />
       <button type="submit">weclapp speichern</button>
+    </form>
+  );
+}
+
+function PlentyForm({ current, onSubmit, onCancel }: { current: { base_url: string; username?: string | null } | null; onSubmit: (body: unknown) => void; onCancel?: () => void }) {
+  const [form, setForm] = useState({ baseUrl: current?.base_url ?? "", username: current?.username ?? "", password: "" });
+  const userChanged = !!current && form.username.trim() !== (current.username ?? "");
+  return (
+    <form className="stack inset" onSubmit={(e) => { e.preventDefault(); onSubmit({ baseUrl: form.baseUrl.trim(), username: form.username.trim(), ...(form.password ? { password: form.password } : {}) }); setForm({ ...form, password: "" }); }}>
+      <h4>plentymarkets verbinden</h4>
+      <p className="muted small">Die Adresse steht in plentymarkets unter Einrichtung → Einstellungen → API → Daten (z. B. https://p12345.my.plentysystems.com). Für SupportX einen eigenen REST-Benutzer anlegen, der Aufträge lesen darf. SupportX liest nur und ändert nichts in plentymarkets.</p>
+      <label>Adresse<input placeholder="https://p12345.my.plentysystems.com" value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} required spellCheck={false} /></label>
+      <label>REST-Benutzer<input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required autoComplete="off" spellCheck={false} /></label>
+      <label>Passwort<input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required={!current || userChanged} autoComplete="new-password" placeholder={current ? "leer = gespeichertes Passwort bleibt" : ""} /></label>
+      <p className="muted small">Das Passwort wird verschlüsselt gespeichert und nie wieder angezeigt.</p>
+      <div className="row">
+        <button type="submit" className="primary">Speichern</button>
+        {onCancel && <button type="button" onClick={onCancel}>Abbrechen</button>}
+      </div>
     </form>
   );
 }

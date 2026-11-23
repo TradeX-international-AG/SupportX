@@ -227,7 +227,7 @@ export async function getCase(ctx: AppContext, actor: Actor, conversationId: str
   // Addresses for links to the order (weclapp tenant, Mirakl back office); no credentials.
   const linkTargets = await one<{ erp_base_url: string | null; mirakl_base_url: string | null; mirakl_base_urls: Record<string, string> | null }>(
     ctx.db,
-    `SELECT (SELECT base_url FROM erp_connections WHERE workspace_id = $1) AS erp_base_url,
+    `SELECT (SELECT base_url FROM erp_connections WHERE workspace_id = $1 AND provider = 'weclapp') AS erp_base_url,
             (SELECT cc.config->>'baseUrl' FROM channel_connections cc
               WHERE cc.workspace_id = $1 AND cc.kind = 'mirakl_inbox'
                 AND cc.default_source_platform = (SELECT source_platform FROM conversations WHERE workspace_id = $1 AND id = $2)
@@ -636,7 +636,7 @@ export async function getSettings(ctx: AppContext, actor: Actor) {
     many(ctx.db, "SELECT id, kind, display_name, config - 'clientState' - 'secretHint' - 'oauthStateHash' - 'oauthStateExpiresAt' - 'oauthStateUserId' AS config, secret_id IS NOT NULL AS has_secret, default_merchant_account_id, default_source_platform, send_enabled, paused, health, last_sync_at, last_error FROM channel_connections WHERE workspace_id = $1 ORDER BY display_name", [ws]),
     many(ctx.db, "SELECT r.id, r.connection_id, r.priority, r.match_type, r.pattern, r.source_platform, r.merchant_account_id, ma.name AS merchant_account_name FROM routing_rules r LEFT JOIN merchant_accounts ma ON ma.id = r.merchant_account_id WHERE r.workspace_id = $1 ORDER BY r.priority, r.pattern", [ws]),
     many(ctx.db, "SELECT v.id, v.connection_id, v.source_platform, v.evidence_note, v.verified_at, u.display_name AS verified_by FROM reply_route_verifications v LEFT JOIN users u ON u.id = v.verified_by WHERE v.workspace_id = $1 AND v.revoked_at IS NULL", [ws]),
-    one(ctx.db, "SELECT id, base_url, search_fields, secret_id IS NOT NULL AS has_secret, status, last_checked_at, last_error, credit_notes_enabled FROM erp_connections WHERE workspace_id = $1", [ws]),
+    one(ctx.db, "SELECT id, provider, base_url, username, search_fields, secret_id IS NOT NULL AS has_secret, status, last_checked_at, last_error, credit_notes_enabled FROM erp_connections WHERE workspace_id = $1", [ws]),
     many(ctx.db, "SELECT id, match_type, pattern, category, hits, last_hit_at, created_at FROM category_rules WHERE workspace_id = $1 ORDER BY match_type DESC, pattern", [ws]),
     many(ctx.db, "SELECT type, status, count(*)::int AS count, max(last_error) AS last_error FROM jobs WHERE workspace_id = $1 AND (status IN ('queued','running','failed')) GROUP BY type, status ORDER BY type", [ws]),
   ]);

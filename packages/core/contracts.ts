@@ -271,8 +271,15 @@ export interface InvoiceFact {
   shippingGrossAmount?: number;
 }
 
+/** Order systems (ERP) behind OrderProvider. One per workspace. */
+export type ErpProvider = "weclapp" | "plentymarkets";
+
+export function erpName(provider: ErpProvider | string | undefined): string {
+  return provider === "plentymarkets" ? "plentymarkets" : "weclapp";
+}
+
 export interface OrderRecord {
-  provider: "weclapp";
+  provider: ErpProvider;
   id: string;
   orderNumber?: string;
   orderNumberAtCustomer?: string;
@@ -321,9 +328,9 @@ export interface ReferenceQuery {
   kind: "order" | "invoice" | "tracking";
 }
 
-/** Order context, read only, plus one optional write: a credit note draft after a person confirmed it. weclapp is the only implementation in v1. */
+/** Order context, read only, plus one optional write: a credit note draft after a person confirmed it. Implemented for weclapp and (read only) plentymarkets. */
 export interface OrderProvider {
-  readonly kind: "weclapp";
+  readonly kind: ErpProvider;
   findOrders(references: ReadonlyArray<ReferenceQuery>, scope: OrderScopeRule): Promise<OrderLookupResult>;
   getOrder(orderId: string, scope: OrderScopeRule): Promise<OrderLookupResult>;
   checkAccess(): Promise<{ ok: boolean; detail: string }>;

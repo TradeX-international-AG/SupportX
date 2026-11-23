@@ -30,7 +30,7 @@ import {
   setPlatformSending,
   setSendEnabled,
   startEbayConsent,
-  upsertWeclappConnection,
+  upsertWeclappConnection, upsertPlentyConnection, deleteErpConnection,
   verifyReplyRoute,
   type GraphConnectionSettings,
 } from "../../packages/services/connections.ts";
@@ -573,6 +573,14 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
   app.put("/api/w/:ws/erp", async (req) => {
     const body = parse(z.object({ baseUrl: z.string().max(300), apiToken: z.string().max(500).optional(), searchFields: z.array(z.string()).max(5).optional() }), req.body);
     return { id: await upsertWeclappConnection(ctx, await actor(req), body) };
+  });
+  app.put("/api/w/:ws/erp/plentymarkets", async (req) => {
+    const body = parse(z.object({ baseUrl: z.string().max(300), username: z.string().max(200), password: z.string().max(500).optional(), searchFields: z.array(z.string()).max(5).optional() }), req.body);
+    return { id: await upsertPlentyConnection(ctx, await actor(req), body) };
+  });
+  app.delete("/api/w/:ws/erp", async (req) => {
+    await deleteErpConnection(ctx, await actor(req));
+    return { ok: true };
   });
   app.put("/api/w/:ws/erp/credit-notes", async (req) => {
     await setCreditNotesEnabled(ctx, await actor(req), parse(z.object({ enabled: z.boolean() }), req.body).enabled);

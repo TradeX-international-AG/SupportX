@@ -56,7 +56,7 @@ TypeScript · Node.js · Fastify · React (Vite) · PostgreSQL · Claude (option
 
 ### Channels
 
-Microsoft 365 mail (with Amazon buyer-seller relay, DocMorris, Shopify and OTTO mails) · eBay · Kaufland · Shop Apotheke, Douglas, MediaMarkt/Saturn, Conrad and Decathlon (Mirakl) · order data from weclapp
+Microsoft 365 mail (with Amazon buyer-seller relay, DocMorris, Shopify and OTTO mails) · eBay · Kaufland · Shop Apotheke, Douglas, MediaMarkt/Saturn, Conrad and Decathlon (Mirakl) · order data from weclapp or plentymarkets
 
 ### Status
 

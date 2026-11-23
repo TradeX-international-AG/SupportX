@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { marketConnections, marketSetup, microsoftSetup, weclappSetup, type SetupInput } from "../../apps/web/src/setup-steps.ts";
+import { erpSetups, marketConnections, marketSetup, microsoftSetup, plentySetup, weclappSetup, type SetupInput } from "../../apps/web/src/setup-steps.ts";
 
 const empty: SetupInput = { connections: [], accounts: [], rules: [], routes: [], erp: null };
 const conn = (id: string, kind: string, extra: Partial<SetupInput["connections"][number]> = {}) =>
@@ -65,6 +65,15 @@ test("errors surface on the card; weclapp is connected only after a successful c
   assert.equal(k.error, "401");
   assert.equal(weclappSetup({ ...empty, erp: { has_secret: true, status: "unchecked", last_error: null } }).connected, false);
   assert.equal(weclappSetup({ ...empty, erp: { has_secret: true, status: "ok", last_error: null } }).connected, true);
+});
+
+test("one order system: both cards while none is set up, then only the connected one", () => {
+  assert.deepEqual(erpSetups(empty).map((c) => c.key), ["weclapp", "plentymarkets"]);
+  const plenty = { ...empty, erp: { provider: "plentymarkets", has_secret: true, status: "ok", last_error: null } };
+  assert.deepEqual(erpSetups(plenty).map((c) => c.key), ["plentymarkets"]);
+  assert.equal(plentySetup(plenty).connected, true);
+  assert.equal(weclappSetup(plenty).connected, false, "a plenty row is not weclapp");
+  assert.deepEqual(erpSetups({ ...empty, erp: { has_secret: true, status: "ok", last_error: null } }).map((c) => c.key), ["weclapp"], "rows without provider are weclapp");
 });
 
 test("steps that need a connection offer no button until it exists", () => {
