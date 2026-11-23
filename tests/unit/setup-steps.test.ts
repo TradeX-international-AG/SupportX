@@ -131,3 +131,13 @@ test("OTTO is a mail market: tick off the mailbox in Partner Connect", () => {
   assert.equal(otto.connected, true);
   assert.match(otto.steps[0]!.title, /OTTO Partner Connect/);
 });
+
+test("Microsoft card carries the send switch for plain e-mail (cases without a recognised marketplace)", () => {
+  assert.equal(microsoftSetup(empty).sending, null, "no mailbox, no switch");
+  const off = microsoftSetup({ ...empty, connections: [conn("g1", "microsoft_graph", { send_enabled: true })] });
+  assert.deepEqual(off.sending, { connectionId: "g1", on: false }, "send enabled but no email route: still off");
+  const on = microsoftSetup({ ...empty, connections: [conn("g1", "microsoft_graph", { send_enabled: true })], routes: [{ connection_id: "g1", source_platform: "email" }] });
+  assert.deepEqual(on.sending, { connectionId: "g1", on: true });
+  const docmorrisOnly = microsoftSetup({ ...empty, connections: [conn("g1", "microsoft_graph", { send_enabled: true })], routes: [{ connection_id: "g1", source_platform: "docmorris" }] });
+  assert.equal(docmorrisOnly.sending?.on, false, "the DocMorris switch does not unlock plain e-mail");
+});

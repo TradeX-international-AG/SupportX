@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AiProvider, AllowedFact, CaseRisk, OrderRecord, Proposal, ProposalInput, ReplyAttachment, ReplyDecision, ReplyOutcome, SourcePlatform } from "../core/contracts.ts";
 import { checkTitles } from "../core/title-check.ts";
+import { PLATFORM_NAMES } from "../core/marketplaces.ts";
 import { weightHints } from "../core/weight-check.ts";
 import { customerText } from "../core/customer-text.ts";
 import { detectRisks, newestEmailText } from "../core/classify.ts";
@@ -501,7 +502,7 @@ export async function sendBlockers(ctx: AppContext, q: Queryable, workspaceId: s
   if (!connection.send_enabled) blockers.push(`Versand ist für die Verbindung „${connection.display_name}“ nicht aktiviert.`);
   if (connection.paused) blockers.push("Die Verbindung ist pausiert.");
   const route = await one(q, "SELECT 1 FROM reply_route_verifications WHERE workspace_id = $1 AND connection_id = $2 AND source_platform = $3 AND revoked_at IS NULL", [workspaceId, connection.id, conv.source_platform]);
-  if (!route) blockers.push(`Der Antwortweg für ${conv.source_platform} über diese Verbindung ist noch nicht mit einer kontrollierten Testantwort geprüft.`);
+  if (!route) blockers.push(`Der Antwortweg für ${PLATFORM_NAMES[conv.source_platform as keyof typeof PLATFORM_NAMES] ?? conv.source_platform} über diese Verbindung ist noch nicht mit einer kontrollierten Testantwort geprüft.`);
   if (conv.merchant_account_id) {
     const account = await one<{ paused: boolean }>(q, "SELECT paused FROM merchant_accounts WHERE workspace_id = $1 AND id = $2", [workspaceId, conv.merchant_account_id]);
     if (account?.paused) blockers.push("Das Verkäuferkonto ist pausiert.");

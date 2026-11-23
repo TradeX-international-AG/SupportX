@@ -1390,7 +1390,7 @@ function DraftEditor(props: {
         <div className="send-blocked small">
           <strong>Senden ist gesperrt</strong>
           <ul>{notice.blocked.map((b) => <li key={b}>{b}</li>)}</ul>
-          {notice.setupHint && <p className="muted">Freischalten in den Einstellungen auf der Karte des Marktplatzes. Bis dahin den Text kopieren und im Marktplatz selbst senden.</p>}
+          {notice.setupHint && <p className="muted">Freischalten in den Einstellungen: bei Marktplätzen auf der Karte des Marktplatzes, bei normalen E-Mails unter Anbindungen auf der Karte „Microsoft-Postfach“. Bis dahin den Text kopieren und im Marktplatz selbst senden.</p>}
         </div>
       )}
     </div>

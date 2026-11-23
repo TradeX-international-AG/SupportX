@@ -113,7 +113,8 @@ export function microsoftSetup(input: SetupInput): ChannelSetup {
     { key: "check", title: "Verbindung testen", done: graph.some(healthy), action: "check" },
   ];
   const err = graph.find((c) => c.health === "error" && !c.paused)?.last_error ?? null;
-  return finish("microsoft", "Microsoft-Postfach", "Grundlage für Amazon, DocMorris und Shopify", steps, graph.some(healthy), err);
+  // Plain support mails (no marketplace recognised) are replied to as "email"; this card unlocks that route.
+  return { ...finish("microsoft", "Microsoft-Postfach", "Grundlage für Amazon, DocMorris und Shopify", steps, graph.some(healthy), err), sending: sendingOf("email", graph.find(healthy), input) };
 }
 
 /** The stored order system, if it is this one (rows without provider are weclapp). */
@@ -185,7 +186,7 @@ export function marketSetup(market: Market, input: SetupInput): ChannelSetup {
   return { ...finish(market, LABEL[market], WAY[market], steps, connected, null), sending: connected ? sendingOf(market, graph.find(healthy), input) : null };
 }
 
-function sendingOf(market: Market, connection: SetupInput["connections"][number] | undefined, input: SetupInput): ChannelSetup["sending"] {
+function sendingOf(market: Market | "email", connection: SetupInput["connections"][number] | undefined, input: SetupInput): ChannelSetup["sending"] {
   if (!connection) return null;
   const routed = input.routes.some((r) => r.connection_id === connection.id && r.source_platform === market);
   return { connectionId: connection.id, on: routed && !!connection.send_enabled };

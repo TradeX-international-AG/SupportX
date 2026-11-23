@@ -139,7 +139,14 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
       {tab === "anbindungen" && <>
       <p className="muted settings-sub">Jede Karte zeigt, was erledigt ist und was als Nächstes zu tun ist. Ein grüner Innenrand heißt: Nachrichten kommen an. Antworten bleiben Entwürfe, bis ein Antwortweg geprüft und der Versand freigeschaltet ist.</p>
 
-      <SetupCard setup={microsoftSetup(data)} owner={owner} onAction={(a) => a === "check" ? checkFirst("microsoft_graph") : setPanel({ card: "microsoft", action: a })}>
+      <SetupCard setup={microsoftSetup(data)} owner={owner} onAction={(a) => a === "check" ? checkFirst("microsoft_graph") : setPanel({ card: "microsoft", action: a })}
+        serverSendOff={data.sendMode !== "enabled"} sendingLabel="Antworten auf normale E-Mails"
+        onSending={(on) => {
+          const setup = microsoftSetup(data);
+          if (!setup.sending) return;
+          if (on && !window.confirm("Antworten auf normale E-Mails freischalten?\n\nDas gilt für Mails ohne erkannten Marktplatz, auch DocMorris- und Shop-Anfragen, die als normale E-Mail ankommen. Jede Antwort geht erst raus, wenn du im Fall auf Senden klickst. Die erste Antwort bitte einmal beim Kunden bzw. im Gesendet-Ordner kontrollieren.")) return;
+          void act(() => api("POST", `${base}/connections/${setup.sending!.connectionId}/platform-sending`, { sourcePlatform: "email", enabled: on }), () => on ? "Versand für normale E-Mails freigeschaltet." : "Versand für normale E-Mails gesperrt.");
+        }}>
         {data.connections.filter((c) => c.kind === "microsoft_graph").map((c) => connectionCard(c))}
         {owner && panel?.card === "microsoft" && panel.action === "connect" && <GraphForm onCancel={closePanel} onSubmit={(body) => { closePanel(); void act(() => api("POST", `${base}/connections`, body), () => "Postfach verbunden. Die ersten Mails kommen in wenigen Minuten."); }} />}
       </SetupCard>
@@ -312,9 +319,9 @@ export function Settings({ workspaceId, role }: { workspaceId: string; role: Rol
   );
 }
 
-function SetupCard({ setup, owner, onAction, graphMailbox, onSending, serverSendOff, children }: {
+function SetupCard({ setup, owner, onAction, graphMailbox, onSending, serverSendOff, sendingLabel, children }: {
   setup: ChannelSetup; owner: boolean; onAction: (a: StepAction) => void; graphMailbox?: string;
-  onSending?: (on: boolean) => void; serverSendOff?: boolean; children?: React.ReactNode;
+  onSending?: (on: boolean) => void; serverSendOff?: boolean; sendingLabel?: string; children?: React.ReactNode;
 }) {
   const doneCount = setup.steps.filter((s) => s.done).length;
   const countable = setup.steps.length;
@@ -352,7 +359,7 @@ function SetupCard({ setup, owner, onAction, graphMailbox, onSending, serverSend
       </ol>
       {setup.sending && (
         <div className="send-line">
-          <span>Antworten senden: <strong>{setup.sending.on ? "freigeschaltet" : "aus, nur Entwürfe"}</strong>
+          <span>{sendingLabel ?? "Antworten senden"}: <strong>{setup.sending.on ? "freigeschaltet" : "aus, nur Entwürfe"}</strong>
             {setup.sending.on && serverSendOff && <span className="warn-text"> · auf dem Server noch gesperrt</span>}
             {setup.sending.on && <span className="muted small"> · jede Antwort erst mit deinem Klick auf Senden im Fall</span>}
           </span>
