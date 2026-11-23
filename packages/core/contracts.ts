@@ -213,6 +213,8 @@ export interface OrderLineFact {
   quantity: number;
   shippedQuantity?: number;
   returnedQuantity?: number;
+  /** Set (bundle) line this line is a part of (weclapp salesOrderItem.parentItemId). */
+  parentLineId?: string;
   /** Line total incl. VAT and line discount in the order currency (weclapp salesOrderItem.grossAmount). */
   grossAmount?: number;
   /** Weight of one unit from the linked ERP article, in kg (weclapp articleGrossWeight / articleNetWeight). */

@@ -224,6 +224,7 @@ export function mapOrder(order: Json, shipments: Json[], invoices: Json[], retri
       quantity: num(item.quantity) ?? 0,
       shippedQuantity: num(item.shippedQuantity),
       returnedQuantity: num(item.returnedQuantity),
+      ...(str(item.parentItemId) ? { parentLineId: str(item.parentItemId) } : {}),
       ...(num(item.grossAmount) !== undefined ? { grossAmount: num(item.grossAmount) } : {}),
       ...(grossWeightKg !== undefined ? { grossWeightKg } : {}),
       ...(netWeightKg !== undefined ? { netWeightKg } : {}),

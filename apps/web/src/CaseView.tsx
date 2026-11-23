@@ -1089,8 +1089,8 @@ function ReturnCheckBox({ check }: { check: ReturnCheck }) {
         <tbody>
           {check.lines.map((l) => (
             <tr key={l.lineId}>
-              <td>{l.title}{a && l.unitGross !== undefined && <span className="muted"> (je {money(l.unitGross)})</span>}</td><td>{l.ordered}</td><td>{l.shipped ?? "?"}</td>
-              <td className={l.received > l.ordered || (l.shipped !== undefined && l.received > l.shipped) ? "error" : undefined}>{l.received}</td>
+              <td>{l.title}{a && l.unitGross !== undefined && <span className="muted"> (je {money(l.unitGross)}{l.partOf ? " aus dem Set-Preis" : ""})</span>}{l.isSet && <span className="muted"> · Set, Teile einzeln gezählt</span>}</td><td>{l.ordered}</td><td>{l.shipped ?? "?"}</td>
+              <td className={l.received > l.ordered || (l.shipped !== undefined && l.received > l.shipped) ? "error" : undefined}>{l.isSet ? "–" : l.received}</td>
               {announced && <td>{l.announced || ""}</td>}
             </tr>
           ))}
@@ -1176,7 +1176,11 @@ function OrderDetails({ order, links, origin, invoices, returns, refund, check, 
       <ul>
         {order.lines.map((l) => {
           const unitKg = l.grossWeightKg ?? l.netWeightKg;
-          return <li key={l.id}>{l.quantity} × {l.title} <span className="muted small">(versendet {l.shippedQuantity ?? 0}, retourniert {l.returnedQuantity ?? 0}{unitKg ? `, je ${formatKg(unitKg)}` : ""})</span></li>;
+          const cl = check?.applicable ? check.lines.find((x) => x.lineId === l.id) : undefined;
+          const erp = l.returnedQuantity ?? 0;
+          // The return check counts the returns themselves; weclapp's returnedQuantity on the line is often not updated.
+          const back = cl?.isSet ? "Set, gezählt an den Teilen" : cl && cl.received !== erp ? `zurück ${cl.received} laut Retoure, am Auftrag ${erp}` : `retourniert ${cl ? cl.received : erp}`;
+          return <li key={l.id}>{l.quantity} × {l.title} <span className="muted small">(versendet {l.shippedQuantity ?? 0}, {back}{cl?.partOf ? `, Teil von „${cl.partOf}“` : ""}{unitKg ? `, je ${formatKg(unitKg)}` : ""})</span></li>;
         })}
       </ul>
       <h4>Lieferungen ({order.shipments.length})</h4>

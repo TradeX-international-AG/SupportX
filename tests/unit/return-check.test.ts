@@ -201,3 +201,53 @@ describe("weclapp amounts", () => {
     }
   });
 });
+
+describe("Retourenprüfung: Sets", () => {
+  // 1 × "X (3er Set)" at 37.52 with its 3 parts at 0.00, no shipping; 2 parts came back.
+  const setOrder = (linked: boolean, returnItems: ReturnFact["items"], extra: Partial<ReturnCheckOrder> = {}): ReturnCheckOrder => ({
+    lines: [
+      { id: "s", title: "SANOTINT® classic 28 Braun Rot 125ml (3er Set)", articleId: "set", quantity: 1, shippedQuantity: 1, returnedQuantity: 0, grossAmount: 37.52 },
+      { id: "p", title: "SANOTINT® classic 28 Braun Rot 125ml", articleId: "part", quantity: 3, shippedQuantity: 3, returnedQuantity: 0, grossAmount: 0, ...(linked ? { parentLineId: "s" } : {}) },
+    ],
+    shipments: [], invoices: [], returns: [ret("571018", IN, returnItems)], grossAmount: 37.52, shippingGrossAmount: 0, currency: "EUR", amountsRead: true, ...extra,
+  });
+
+  it("parts linked by parentItemId: counted on the parts, valued from the set price", () => {
+    const c = returnCheck(setOrder(true, [{ orderLineId: "p", quantity: 2 }]));
+    assert.equal(c.receivedUnits, 2);
+    assert.equal(c.baseUnits, 3, "the set line itself is not a unit");
+    assert.equal(c.complete, false);
+    assert.equal(c.amounts?.goods, 25.01);
+    assert.equal(c.amounts?.expected, 25.01);
+    assert.equal(c.lines.find((l) => l.lineId === "s")?.isSet, true);
+    assert.equal(c.lines.find((l) => l.lineId === "p")?.unitGross, 12.51);
+    const partial = c.findings.find((f) => f.code === "partial")!;
+    assert.match(partial.text, /2 von 3 Stück/);
+    assert.doesNotMatch(partial.text, /3er Set\)“,/, "the set line is not listed as missing");
+  });
+
+  it("older snapshot without the link: recognised by title and price", () => {
+    const c = returnCheck(setOrder(false, [{ orderLineId: "p", quantity: 2 }]));
+    assert.equal(c.amounts?.goods, 25.01);
+    assert.equal(c.lines.find((l) => l.lineId === "p")?.setGuessed, true);
+    assert.ok(c.findings.some((f) => f.code === "set_parts"));
+  });
+
+  it("whole set returned on the set line: booked on its parts, complete, full price", () => {
+    const c = returnCheck(setOrder(true, [{ orderLineId: "s", quantity: 1 }]));
+    assert.equal(c.receivedUnits, 3);
+    assert.equal(c.complete, true);
+    assert.equal(c.amounts?.goods, 37.52);
+  });
+
+  it("no set: a zero-priced line with an unrelated title stays a normal line", () => {
+    const c = returnCheck(setOrder(false, [{ orderLineId: "p", quantity: 1 }], {
+      lines: [
+        { id: "s", title: "Haarfarbe Set", quantity: 1, shippedQuantity: 1, grossAmount: 37.52 },
+        { id: "p", title: "Gratisprobe", quantity: 3, shippedQuantity: 3, grossAmount: 0 },
+      ],
+    }));
+    assert.equal(c.lines.some((l) => l.isSet), false);
+    assert.equal(c.amounts?.goods, 0);
+  });
+});

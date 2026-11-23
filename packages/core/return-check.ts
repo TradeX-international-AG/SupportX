@@ -13,7 +13,7 @@ import type { ReturnFact } from "./returns.ts";
 
 /** The parts of an order snapshot this module reads (structural, so the browser bundle needs no server types). */
 export interface ReturnCheckOrder {
-  lines: ReadonlyArray<{ id: string; title?: string; articleId?: string; quantity: number; shippedQuantity?: number; returnedQuantity?: number; grossAmount?: number }>;
+  lines: ReadonlyArray<{ id: string; title?: string; articleId?: string; quantity: number; shippedQuantity?: number; returnedQuantity?: number; grossAmount?: number; parentLineId?: string }>;
   shipments: ReadonlyArray<{ items: ReadonlyArray<{ orderLineId?: string; quantity: number }> }>;
   invoices: ReadonlyArray<{ id: string; invoiceNumber?: string; type?: string; grossAmount?: number; shippingGrossAmount?: number }>;
   returns?: ReadonlyArray<ReturnFact>;
@@ -46,6 +46,12 @@ export interface ReturnLineCheck {
   erpReturned?: number;
   /** Value of one unit incl. VAT (line gross / quantity, incl. a share of an order discount). */
   unitGross?: number;
+  /** This line is a set (bundle): its parts are separate lines; units are counted on the parts. */
+  isSet?: boolean;
+  /** This line is a part of the set with this title; its value comes from the set price when it has none of its own. */
+  partOf?: string;
+  /** The set was recognised by title and price, not by the parent link in weclapp. */
+  setGuessed?: boolean;
 }
 
 export interface ReturnFinding {
@@ -63,7 +69,8 @@ export interface ReturnFinding {
     | "credit_higher"
     | "credit_lower"
     | "credit_matches"
-    | "amounts_unknown";
+    | "amounts_unknown"
+    | "set_parts";
   tone: CheckTone;
   text: string;
 }
@@ -125,6 +132,31 @@ export function refundNoticeAmount(subject: string | null | undefined): RefundNo
 
 const RECEIVED = "INCOMING_MOVED_INTO_STORE";
 
+const norm = (t: string | undefined) => (t ?? "").toLowerCase().replace(/[®™©]/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * Sets (bundles, "3er Set"): weclapp books a set as one priced line plus its parts
+ * as lines of their own (usually at 0,00 €), linked by parentItemId. Returns come
+ * back as parts, so units are counted on the parts and their value is the set
+ * price spread over them. Without the link (older snapshots), a zero-priced line
+ * counts as a part when exactly one priced line starts with its title and the
+ * quantities fit (e.g. 1 × "X (3er Set)" and 3 × "X").
+ */
+export function setGroups(lines: ReturnCheckOrder["lines"]): { parts: Map<string, string[]>; guessed: boolean } {
+  const ids = new Set(lines.map((l) => l.id));
+  const parts = new Map<string, string[]>();
+  for (const l of lines) {
+    if (l.parentLineId && ids.has(l.parentLineId) && l.parentLineId !== l.id) parts.set(l.parentLineId, [...(parts.get(l.parentLineId) ?? []), l.id]);
+  }
+  if (parts.size > 0 || lines.some((l) => l.parentLineId)) return { parts, guessed: false };
+  for (const l of lines) {
+    if (l.grossAmount !== 0 || !norm(l.title)) continue;
+    const parents = lines.filter((p) => p.id !== l.id && (p.grossAmount ?? 0) > 0 && p.quantity > 0 && norm(p.title).length > norm(l.title).length && norm(p.title).startsWith(norm(l.title)) && l.quantity % p.quantity === 0);
+    if (parents.length === 1) parts.set(parents[0]!.id, [...(parts.get(parents[0]!.id) ?? []), l.id]);
+  }
+  return { parts, guessed: parts.size > 0 };
+}
+
 function shippedOf(order: ReturnCheckOrder, lineId: string, lineShipped: number | undefined): number | undefined {
   if (lineShipped !== undefined) return lineShipped;
   const items = order.shipments.flatMap((s) => s.items).filter((i) => i.orderLineId === lineId);
@@ -144,6 +176,21 @@ export function returnCheck(order: ReturnCheckOrder, notices: ReadonlyArray<Refu
     ...(l.returnedQuantity !== undefined ? { erpReturned: l.returnedQuantity } : {}),
   }));
   const byId = new Map(lines.map((l) => [l.lineId, l]));
+  const sets = setGroups(order.lines);
+  const partsOf = (id: string) => (sets.parts.get(id) ?? []).map((p) => byId.get(p)!).filter(Boolean);
+  for (const [parentId, partIds] of sets.parts) {
+    const parent = byId.get(parentId)!;
+    parent.isSet = true;
+    for (const id of partIds) {
+      const part = byId.get(id)!;
+      part.partOf = parent.title;
+      if (sets.guessed) part.setGuessed = true;
+    }
+  }
+  /** A whole set counted on the set line: book it on its parts (n sets = n × parts per set). */
+  const onParts = (parent: ReturnLineCheck, quantity: number, field: "received" | "announced") => {
+    for (const p of partsOf(parent.lineId)) p[field] += parent.ordered > 0 ? Math.floor((quantity * p.ordered) / parent.ordered) : quantity;
+  };
   const byArticle = new Map<string, ReturnLineCheck[]>();
   order.lines.forEach((l, i) => {
     if (l.articleId) byArticle.set(l.articleId, [...(byArticle.get(l.articleId) ?? []), lines[i]!]);
@@ -168,7 +215,8 @@ export function returnCheck(order: ReturnCheckOrder, notices: ReadonlyArray<Refu
         });
         continue;
       }
-      if (isReceived) line.received += item.quantity;
+      if (line.isSet) onParts(line, item.quantity, isReceived ? "received" : "announced");
+      else if (isReceived) line.received += item.quantity;
       else line.announced += item.quantity;
       returnsPerLine.set(line.lineId, (returnsPerLine.get(line.lineId) ?? new Set()).add(ret.returnNumber ?? ret.id));
     }
@@ -177,10 +225,12 @@ export function returnCheck(order: ReturnCheckOrder, notices: ReadonlyArray<Refu
   // Returned quantity on the order line without any return record (booked in weclapp directly, or a snapshot taken before returns were read).
   const recordsRead = order.returns !== undefined;
   if (active.length === 0) {
-    for (const l of lines) if (l.erpReturned) l.received = l.erpReturned;
+    for (const l of lines) if (l.erpReturned && !l.isSet) l.received = Math.max(l.received, l.erpReturned);
+    for (const l of lines) if (l.erpReturned && l.isSet && partsOf(l.lineId).every((p) => !p.erpReturned)) onParts(l, l.erpReturned, "received");
   }
 
-  for (const l of lines) {
+  const units = lines.filter((l) => !l.isSet);
+  for (const l of units) {
     const inReturns = l.received + l.announced;
     const numbers = [...(returnsPerLine.get(l.lineId) ?? [])];
     if (inReturns > l.ordered) {
@@ -206,21 +256,21 @@ export function returnCheck(order: ReturnCheckOrder, notices: ReadonlyArray<Refu
   }
 
   // Compared with what was shipped; when weclapp records no shipped units at all, with what was ordered.
-  const shippingKnown = lines.some((l) => (l.shipped ?? 0) > 0);
+  const shippingKnown = units.some((l) => (l.shipped ?? 0) > 0);
   const base = (l: ReturnLineCheck) => (shippingKnown && l.shipped !== undefined ? Math.min(l.shipped, l.ordered) : l.ordered);
-  const receivedUnits = lines.reduce((sum, l) => sum + Math.min(l.received, l.ordered), 0);
-  const baseUnits = lines.reduce((sum, l) => sum + base(l), 0);
-  const applicable = active.length > 0 || lines.some((l) => l.received > 0) || findings.length > 0;
-  const complete = receivedUnits > 0 && lines.every((l) => Math.min(l.received, l.ordered) >= base(l));
+  const receivedUnits = units.reduce((sum, l) => sum + Math.min(l.received, l.ordered), 0);
+  const baseUnits = units.reduce((sum, l) => sum + base(l), 0);
+  const applicable = active.length > 0 || units.some((l) => l.received > 0) || findings.length > 0;
+  const complete = receivedUnits > 0 && units.every((l) => Math.min(l.received, l.ordered) >= base(l));
 
   if (receivedUnits > 0) {
     if (complete) {
       findings.push({ code: "complete", tone: "good", text: `Vollständige Rücksendung: alle ${baseUnits} Stück sind zurück.` });
     } else {
-      const missing = lines
+      const missing = units
         .map((l) => ({ l, open: base(l) - Math.min(l.received, l.ordered) }))
         .filter((x) => x.open > 0)
-        .map((x) => `${x.open} × „${x.l.title}“`);
+        .map((x) => `${x.open} × „${x.l.title}“${x.l.partOf ? ` (aus „${x.l.partOf}“)` : ""}`);
       findings.push({
         code: "partial",
         tone: "warn",
@@ -229,12 +279,21 @@ export function returnCheck(order: ReturnCheckOrder, notices: ReadonlyArray<Refu
     }
   }
 
-  const amounts = receivedUnits > 0 ? amountsOf(order, lines, complete, notices, findings) : undefined;
+  if (sets.parts.size > 0 && receivedUnits > 0) {
+    const names = [...sets.parts.keys()].map((id) => `„${byId.get(id)!.title}“`).join(", ");
+    findings.push({
+      code: "set_parts",
+      tone: "neutral",
+      text: `${names} ist ein Set: gezählt werden die einzelnen Teile, ihr Wert ist der Set-Preis geteilt durch die Teile.${sets.guessed ? " Das Set ist an Titel und Preis erkannt; „Neu aus weclapp abrufen“ liest die Verknüpfung aus weclapp." : ""}`,
+    });
+  }
+
+  const amounts = receivedUnits > 0 ? amountsOf(order, lines, complete, notices, findings, sets.parts) : undefined;
   const tone: CheckTone = findings.some((f) => f.tone === "bad") ? "bad" : findings.some((f) => f.tone === "warn") ? "warn" : findings.some((f) => f.tone === "good") ? "good" : "neutral";
   return { applicable, tone, lines, findings, complete, receivedUnits, baseUnits, ...(amounts ? { amounts } : {}) };
 }
 
-function amountsOf(order: ReturnCheckOrder, lines: ReturnLineCheck[], complete: boolean, notices: ReadonlyArray<RefundNoticeAmount>, findings: ReturnFinding[]): ReturnAmounts | undefined {
+function amountsOf(order: ReturnCheckOrder, lines: ReturnLineCheck[], complete: boolean, notices: ReadonlyArray<RefundNoticeAmount>, findings: ReturnFinding[], setParts: ReadonlyMap<string, string[]>): ReturnAmounts | undefined {
   if (!order.amountsRead || order.grossAmount === undefined) {
     findings.push({ code: "amounts_unknown", tone: "neutral", text: "Beträge sind in diesem Abruf nicht enthalten. „Neu aus weclapp abrufen“ liest Preise und Versandkosten." });
     return undefined;
@@ -243,12 +302,23 @@ function amountsOf(order: ReturnCheckOrder, lines: ReturnLineCheck[], complete: 
   const lineTotal = order.lines.reduce((sum, l) => sum + (l.grossAmount ?? 0), 0);
   // An order discount (headerDiscount) lowers the order total, not the line amounts: spread it over the lines.
   const factor = lineTotal > 0 && order.grossAmount - shipping < lineTotal - CENT ? Math.max(0, (order.grossAmount - shipping) / lineTotal) : 1;
+  // Value per unit; parts without a price of their own share the set price.
+  const unit = new Map<string, number>();
+  for (const l of order.lines) if (l.grossAmount !== undefined && l.quantity > 0) unit.set(l.id, (l.grossAmount * factor) / l.quantity);
+  for (const [parentId, partIds] of setParts) {
+    const parent = order.lines.find((l) => l.id === parentId);
+    const free = order.lines.filter((l) => partIds.includes(l.id) && !(l.grossAmount ?? 0));
+    const count = free.reduce((sum, l) => sum + l.quantity, 0);
+    if (!parent || parent.grossAmount === undefined || count <= 0) continue;
+    for (const l of free) unit.set(l.id, (parent.grossAmount * factor) / count);
+  }
   let goods = 0;
   for (const [i, l] of order.lines.entries()) {
     const check = lines[i]!;
-    if (l.grossAmount === undefined || l.quantity <= 0) continue;
-    check.unitGross = round((l.grossAmount * factor) / l.quantity);
-    goods += (l.grossAmount * factor * Math.min(check.received, l.quantity)) / l.quantity;
+    const value = unit.get(l.id);
+    if (value === undefined) continue;
+    check.unitGross = round(value);
+    if (!check.isSet) goods += value * Math.min(check.received, l.quantity);
   }
   goods = round(goods);
   const maximum = round(order.grossAmount);
