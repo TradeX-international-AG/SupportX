@@ -119,6 +119,36 @@ export function App() {
       .catch((error: Error) => setOauthNotice(`eBay-Anmeldung fehlgeschlagen: ${error.message}`));
   }, [me]);
 
+  // "Bei Amazon anmelden": Amazon's login step (hand back a fresh state and return to
+  // Seller Central) and its redirect with the one-time code. Same reason as eBay above.
+  useEffect(() => {
+    if (!me) return;
+    const params = new URLSearchParams(window.location.search);
+    const callbackUri = params.get("amazon_callback_uri");
+    const amazonState = params.get("amazon_state");
+    const code = params.get("amazon_code");
+    const state = params.get("amazon_oauth_state");
+    const seller = params.get("amazon_seller");
+    const failed = params.get("amazon_error");
+    if (!callbackUri && !code && !failed) return;
+    window.history.replaceState(null, "", `${window.location.pathname}${settingsHash("marktplaetze")}`);
+    setView("settings");
+    if (callbackUri && amazonState) {
+      setOauthNotice("Weiter zu Amazon …");
+      api<{ url: string }>("POST", "/api/oauth/amazon/continue", { amazonCallbackUri: callbackUri, amazonState })
+        .then((r) => { window.location.href = r.url; })
+        .catch((error: Error) => setOauthNotice(`Amazon-Anmeldung fehlgeschlagen: ${error.message}`));
+      return;
+    }
+    if (failed || !code || !state || !seller) {
+      setOauthNotice(`Amazon-Anmeldung nicht abgeschlossen (${failed ?? "unvollständig"}).`);
+      return;
+    }
+    api<{ sellerIdHint: string }>("POST", "/api/oauth/amazon/complete", { code, state, sellingPartnerId: seller })
+      .then((r) => setOauthNotice(`Amazon-Verkäuferkonto ${r.sellerIdHint} verbunden. Bitte unter „Amazon-Angebote“ einmal „Verbindung testen“.`))
+      .catch((error: Error) => setOauthNotice(`Amazon-Anmeldung fehlgeschlagen: ${error.message}`));
+  }, [me]);
+
   if (loading) return <div className="center muted">Lädt …</div>;
   if (!me) return <Login onDone={load} brand={installBrand} />;
   const workspace = me.workspaces.find((w) => w.id === workspaceId);

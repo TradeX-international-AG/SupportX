@@ -44,8 +44,11 @@ Zwei Arten von Zugang:
 - **Wie:** Entwicklerprofil ausfüllen, Rollen „Inventory and Order Tracking“
   und „Product Listing“ anfragen, Anwendungsfälle beschreiben (Kundenservice,
   keine personenbezogenen Daten gespeichert außer zur Bearbeitung des Falls).
-  Nach der Freigabe die App mit dem Verkäuferkonto autorisieren und den
-  neuen Refresh-Token in SupportX unter „Amazon-Angebote“ eintragen.
+  Nach der Freigabe: Mit der App der Installation (`AMAZON_SP_*` in der
+  `.env`, seit 0.23.0) unter „Amazon-Angebote“ „Bei Amazon anmelden“ bzw.
+  „Neu anmelden“; Selbst-Hoster mit eigener App tragen den neuen
+  Refresh-Token unter „Ändern“ ein. Stand 24.11.2026: Entwicklerprofil der
+  Tradex AG (gilt auch für ASEIO) hat die Rolle noch nicht.
 - **Dauer:** einige Tage bis Wochen (Prüfung durch Amazon).
 
 ### 2. eBay: eigenes Keyset für SupportX

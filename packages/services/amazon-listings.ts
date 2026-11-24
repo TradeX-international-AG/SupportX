@@ -3,6 +3,7 @@ import { AmazonListingsClient, type ListingInfo } from "../connectors/amazon/lis
 import { HttpError } from "../connectors/http.ts";
 import { AmazonRefundsClient } from "../connectors/amazon/refunds.ts";
 import { many, one, withTx, type Queryable } from "../storage/db.ts";
+import { operatorAmazonApp } from "../storage/config.ts";
 import { audit } from "./audit.ts";
 import { parseSecret } from "./connections.ts";
 import { requireRole, ServiceError, type Actor, type AppContext } from "./context.ts";
@@ -19,7 +20,9 @@ export interface AmazonConnectionRow {
   region: AmazonRegion;
   seller_id: string;
   marketplace_ids: string[];
-  client_id: string;
+  /** Null when the installation's app (.env) is used. */
+  client_id: string | null;
+  operator_app: boolean;
   secret_id: string;
   api_base_url: string | null;
   token_url: string | null;
@@ -29,8 +32,9 @@ export interface AmazonConnectionRow {
   refunds_enabled: boolean;
 }
 
-interface AmazonSecret {
-  clientSecret: string;
+export interface AmazonSecret {
+  /** Absent when the installation's app (.env) is used. */
+  clientSecret?: string;
   refreshToken: string;
 }
 
@@ -43,11 +47,20 @@ export async function loadConnection(q: Queryable, workspaceId: string): Promise
 /** Credentials of the stored access, for an SP-API client. Server only. */
 export async function amazonClientConfig(ctx: AppContext, q: Queryable, row: AmazonConnectionRow) {
   const secret = parseSecret<AmazonSecret>(await ctx.secrets.read(q, row.workspace_id, row.secret_id), "Amazon");
+  let app: { clientId: string; clientSecret: string };
+  if (row.operator_app) {
+    const operator = operatorAmazonApp(ctx.config);
+    if (!operator) throw new ServiceError(409, "AMAZON_APP_MISSING", "Der Amazon-Zugang dieser Installation fehlt (AMAZON_SP_APP_ID, AMAZON_SP_CLIENT_ID, AMAZON_SP_CLIENT_SECRET). Bitte den Betreiber fragen.");
+    app = { clientId: operator.clientId, clientSecret: operator.clientSecret };
+  } else {
+    if (!row.client_id || !secret.clientSecret) throw new ServiceError(409, "NOT_CONNECTED", "Client-ID oder Client-Secret fehlen. Bitte unter „Ändern“ eintragen.");
+    app = { clientId: row.client_id, clientSecret: secret.clientSecret };
+  }
   return {
     region: row.region,
     sellerId: row.seller_id,
-    clientId: row.client_id,
-    clientSecret: secret.clientSecret,
+    clientId: app.clientId,
+    clientSecret: app.clientSecret,
     refreshToken: secret.refreshToken,
     apiBaseUrl: row.api_base_url ?? undefined,
     tokenUrl: row.token_url ?? undefined,
@@ -67,13 +80,17 @@ async function clientFor(ctx: AppContext, q: Queryable, row: AmazonConnectionRow
 /** What the settings page may see: identifiers masked, secrets only as "hinterlegt". */
 export async function getAmazonListingSettings(ctx: AppContext, actor: Actor) {
   const row = await loadConnection(ctx.db, actor.workspaceId);
-  if (!row) return { configured: false as const, marketplaces: AMAZON_MARKETPLACES };
+  // Whether this installation has its own SP-API app: then a merchant only clicks "Bei Amazon anmelden".
+  const operatorApp = !!operatorAmazonApp(ctx.config);
+  if (!row) return { configured: false as const, operatorApp, marketplaces: AMAZON_MARKETPLACES };
   return {
     configured: true as const,
+    operatorApp,
+    viaOperatorApp: row.operator_app,
     marketplaces: AMAZON_MARKETPLACES,
     region: row.region,
     sellerIdHint: maskIdentifier(row.seller_id),
-    clientIdHint: maskIdentifier(row.client_id),
+    clientIdHint: row.client_id ? maskIdentifier(row.client_id) : null,
     marketplaceIds: row.marketplace_ids,
     status: row.status,
     lastCheckedAt: row.last_checked_at,
@@ -113,7 +130,7 @@ export async function saveAmazonListingConnection(ctx: AppContext, actor: Actor,
       if (m.region !== region) throw new ServiceError(400, "INVALID", `${m.label} gehört nicht zur gewählten Region.`);
     }
     const sellerId = t(input.sellerId) ?? existing?.seller_id;
-    const clientId = t(input.clientId) ?? existing?.client_id;
+    const clientId = t(input.clientId) ?? existing?.client_id ?? undefined;
     const old = existing ? parseSecret<AmazonSecret>(await ctx.secrets.read(tx, actor.workspaceId, existing.secret_id), "Amazon") : null;
     const clientSecret = t(input.clientSecret) ?? old?.clientSecret;
     const refreshToken = t(input.refreshToken) ?? old?.refreshToken;
@@ -130,13 +147,13 @@ export async function saveAmazonListingConnection(ctx: AppContext, actor: Actor,
     } catch (error) {
       throw new ServiceError(400, "INVALID", (error as Error).message);
     }
-    const secretChanged = !old || clientSecret !== old.clientSecret || refreshToken !== old.refreshToken;
+    const secretChanged = !old || existing!.operator_app || clientSecret !== old.clientSecret || refreshToken !== old.refreshToken;
     const secretId = secretChanged ? await ctx.secrets.store(tx, actor.workspaceId, "amazon_sp_api", JSON.stringify({ clientSecret, refreshToken } satisfies AmazonSecret)) : existing!.secret_id;
     await tx.query(
-      `INSERT INTO amazon_listing_connections (workspace_id, region, seller_id, marketplace_ids, client_id, secret_id, api_base_url, token_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO amazon_listing_connections (workspace_id, region, seller_id, marketplace_ids, client_id, secret_id, api_base_url, token_url, operator_app)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)
        ON CONFLICT (workspace_id) DO UPDATE SET region = EXCLUDED.region, seller_id = EXCLUDED.seller_id, marketplace_ids = EXCLUDED.marketplace_ids,
-         client_id = EXCLUDED.client_id, secret_id = EXCLUDED.secret_id, api_base_url = EXCLUDED.api_base_url, token_url = EXCLUDED.token_url,
+         client_id = EXCLUDED.client_id, operator_app = false, secret_id = EXCLUDED.secret_id, api_base_url = EXCLUDED.api_base_url, token_url = EXCLUDED.token_url,
          status = 'configured', last_error = NULL, updated_at = now()`,
       [actor.workspaceId, region, sellerId, marketplaceIds, clientId, secretId, apiBaseUrl, tokenUrl],
     );

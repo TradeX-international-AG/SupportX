@@ -49,6 +49,7 @@ import { writeDesignMd, type WorkspaceTheme } from "../../packages/core/design-m
 import { caseMarketplaceOrderInfo, checkOttoConnection, deleteOttoConnection, getOttoSettings, lookupCaseMarketplaceOrder, saveOttoConnection } from "../../packages/services/marketplace-orders.ts";
 import { checkDhlConnection, deleteDhlConnection, getDhlSettings, saveDhlConnection, trackCaseParcels } from "../../packages/services/dhl-tracking.ts";
 import { createPhoneToken, deletePhoneConnection, getPhoneSettings, handlePhoneWebhook, phoneInvoiceRequest, phoneOrderStatus, savePhoneSettings, workspaceForToolToken } from "../../packages/services/phone.ts";
+import { AMAZON_CALLBACK_PATH, AMAZON_LOGIN_PATH, completeAmazonConsent, continueAmazonConsent, startAmazonConsent } from "../../packages/services/amazon-oauth.ts";
 import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection, setAmazonRefundsEnabled } from "../../packages/services/amazon-listings.ts";
 import { createCreditNote, lookupCreditNote, setCreditNotesEnabled, settleUncertainCreditNote } from "../../packages/services/credit-notes.ts";
 import { checkAmazonRefund, issueAmazonRefund, lookupAmazonRefundOrder, settleUncertainAmazonRefund } from "../../packages/services/amazon-refunds.ts";
@@ -553,6 +554,41 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     return { ok: true };
   });
   app.post("/api/w/:ws/amazon-listings/check", async (req) => checkAmazonListingConnection(ctx, await actor(req)));
+  // "Bei Amazon anmelden" with the installation's own SP-API app (AMAZON_SP_* in .env).
+  app.post("/api/w/:ws/amazon-listings/authorize", async (req) => {
+    const body = parse(z.object({ region: z.string().max(4), marketplaceIds: z.array(z.string().max(20)).min(1).max(20) }), req.body);
+    return { url: await startAmazonConsent(ctx, await actor(req), body) };
+  });
+  // Amazon sends the browser to the app's login URI and later to its redirect URI. The
+  // session cookie is SameSite=strict and absent on these cross-site navigations, so
+  // both pages hand the values to the web app, which continues with a normal API call.
+  app.get(AMAZON_LOGIN_PATH, async (req, reply) => {
+    const q = req.query as { amazon_callback_uri?: string; amazon_state?: string };
+    const params = new URLSearchParams();
+    if (q.amazon_callback_uri && q.amazon_state) {
+      params.set("amazon_callback_uri", q.amazon_callback_uri.slice(0, 500));
+      params.set("amazon_state", q.amazon_state.slice(0, 500));
+    } else params.set("amazon_error", "unvollständig");
+    return reply.redirect(`/?${params.toString()}`);
+  });
+  app.get(AMAZON_CALLBACK_PATH, async (req, reply) => {
+    const q = req.query as { spapi_oauth_code?: string; state?: string; selling_partner_id?: string; error?: string; error_description?: string };
+    const params = new URLSearchParams();
+    if (q.spapi_oauth_code && q.state && q.selling_partner_id) {
+      params.set("amazon_code", q.spapi_oauth_code.slice(0, 2000));
+      params.set("amazon_oauth_state", q.state.slice(0, 200));
+      params.set("amazon_seller", q.selling_partner_id.slice(0, 40));
+    } else params.set("amazon_error", (q.error_description ?? q.error ?? "abgebrochen").slice(0, 100));
+    return reply.redirect(`/?${params.toString()}`);
+  });
+  app.post("/api/oauth/amazon/continue", async (req) => {
+    const body = parse(z.object({ amazonCallbackUri: z.string().min(1).max(500), amazonState: z.string().min(1).max(500) }), req.body);
+    return { url: await continueAmazonConsent(ctx, req.userId!, body) };
+  });
+  app.post("/api/oauth/amazon/complete", async (req) => {
+    const body = parse(z.object({ code: z.string().min(1).max(2000), state: z.string().min(1).max(200), sellingPartnerId: z.string().min(1).max(40) }), req.body);
+    return completeAmazonConsent(ctx, req.userId!, body);
+  });
   // DHL Shipment Tracking (owner). The key is never returned, only "••••abcd".
   app.get("/api/w/:ws/dhl-tracking", async (req) => getDhlSettings(ctx, await actor(req)));
   app.put("/api/w/:ws/dhl-tracking", async (req) => {

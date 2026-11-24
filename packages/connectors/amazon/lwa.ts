@@ -39,3 +39,25 @@ export class LwaToken {
     return token;
   }
 }
+
+/**
+ * Website authorisation: exchanges the one-time `spapi_oauth_code` (valid about
+ * five minutes) for the seller's refresh token. `redirectUri` must be the
+ * registered redirect URI the code was sent to.
+ */
+export async function exchangeAmazonAuthCode(opts: { tokenUrl: URL; clientId: string; clientSecret: string; code: string; redirectUri: string; timeoutMs?: number; fetchImpl?: typeof fetch }): Promise<{ refreshToken: string }> {
+  const form = { grant_type: "authorization_code", code: opts.code, redirect_uri: opts.redirectUri, client_id: opts.clientId, client_secret: opts.clientSecret };
+  let res: unknown;
+  try {
+    res = await requestJson(opts.tokenUrl, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: new URLSearchParams(form).toString(), timeoutMs: opts.timeoutMs ?? 15_000, fetchImpl: opts.fetchImpl });
+  } catch (error) {
+    if (error instanceof HttpError && (error.status === 400 || error.status === 401)) {
+      throw new HttpError(`Amazon hat die Anmeldung nicht bestätigt (Code abgelaufen oder App-Zugang passt nicht): ${error.message}`, error.status, false, false);
+    }
+    throw new HttpError(error instanceof Error ? error.message : String(error), error instanceof HttpError ? error.status : 0, true, false);
+  }
+  const body = (res && typeof res === "object" ? res : {}) as Record<string, unknown>;
+  const refreshToken = typeof body.refresh_token === "string" ? body.refresh_token : "";
+  if (!/^Atzr\|/.test(refreshToken)) throw new HttpError("Amazon lieferte keinen Refresh-Token.", 502, false, false);
+  return { refreshToken };
+}

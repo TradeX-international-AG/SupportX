@@ -55,7 +55,7 @@ describe("Amazon-Angebot aus dem Fall deaktivieren", () => {
     const text = JSON.stringify(view);
     assert.equal(view.configured, true);
     for (const secret of [APP.clientSecret, APP.refreshToken, APP.clientId, APP.sellerId]) assert.ok(!text.includes(secret), "no stored credential in the settings view");
-    assert.ok(view.configured && view.clientIdHint.startsWith("amzn1.") && view.clientIdHint.includes("…"));
+    assert.ok(view.configured && !!view.clientIdHint && view.clientIdHint.startsWith("amzn1.") && view.clientIdHint.includes("…"));
     const stored = await one<{ ciphertext: Buffer }>(h.ctx.db, "SELECT s.ciphertext FROM secrets s JOIN amazon_listing_connections a ON a.secret_id = s.id");
     assert.ok(!stored!.ciphertext.toString("utf8").includes("Atzr|"), "refresh token encrypted at rest");
 

@@ -3,8 +3,8 @@ import { api, fmtDate } from "./api.ts";
 import { AMAZON_MARKETPLACES, AMAZON_REGION_LABEL, type AmazonRegion } from "../../../packages/core/amazon-marketplaces.ts";
 
 type Settings =
-  | { configured: false }
-  | { configured: true; region: AmazonRegion; sellerIdHint: string; clientIdHint: string; marketplaceIds: string[]; status: string; lastCheckedAt: string | null; lastError: string | null; refundsEnabled: boolean };
+  | { configured: false; operatorApp: boolean }
+  | { configured: true; operatorApp: boolean; viaOperatorApp: boolean; region: AmazonRegion; sellerIdHint: string; clientIdHint: string | null; marketplaceIds: string[]; status: string; lastCheckedAt: string | null; lastError: string | null; refundsEnabled: boolean };
 
 /**
  * Settings card for the Amazon Selling Partner API access that lets a person
@@ -14,6 +14,7 @@ type Settings =
 export function AmazonListingsCard({ base, owner }: { base: string; owner: boolean }) {
   const [data, setData] = useState<Settings | null>(null);
   const [editing, setEditing] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const load = useCallback(() => api<Settings>("GET", `${base}/amazon-listings`).then(setData, (e: Error) => setError(e.message)), [base]);
@@ -24,6 +25,7 @@ export function AmazonListingsCard({ base, owner }: { base: string; owner: boole
     try {
       setNotice(ok(await fn()));
       setEditing(false);
+      setSigningIn(false);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -31,6 +33,11 @@ export function AmazonListingsCard({ base, owner }: { base: string; owner: boole
   };
   if (!data) return null;
   const connected = data.configured && data.status === "ok";
+  const viaApp = data.configured && data.viaOperatorApp;
+  const signIn = (body: { region: AmazonRegion; marketplaceIds: string[] }) => {
+    setError(null); setNotice(null);
+    api<{ url: string }>("POST", `${base}/amazon-listings/authorize`, body).then((r) => { window.location.href = r.url; }, (e: Error) => setError(e.message));
+  };
   const pill = !data.configured ? { cls: "pill muted", label: "Nicht eingerichtet" } : data.status === "error" ? { cls: "pill bad", label: "Fehler" } : connected ? { cls: "pill ok", label: "Angebunden" } : { cls: "pill warn", label: "Noch nicht getestet" };
   return (
     <section className={`card setup${connected ? " connected" : ""}`} aria-label="Amazon-Angebote">
@@ -41,17 +48,23 @@ export function AmazonListingsCard({ base, owner }: { base: string; owner: boole
         </div>
         <span className={pill.cls}>{pill.label}</span>
       </div>
-      <p className="muted small">Hat ein Kunde recht, weil das Amazon-Angebot falsch ist, kann man es im Fall mit einem Klick und einer Bestätigung deaktivieren. Nie automatisch. Die SP-API-App braucht die Rolle „Product Listing“; der Verkäufer autorisiert sie einmal in Seller Central und erhält dabei den Refresh-Token.</p>
+      <p className="muted small">Hat ein Kunde recht, weil das Amazon-Angebot falsch ist, kann man es im Fall mit einem Klick und einer Bestätigung deaktivieren. Nie automatisch. {data.operatorApp ? "Dafür meldet sich der Verkäufer einmal bei Amazon an und erlaubt SupportX den Zugriff." : "Die SP-API-App braucht die Rolle „Product Listing“; der Verkäufer autorisiert sie einmal in Seller Central und erhält dabei den Refresh-Token."}</p>
       {error && <p className="notice bad small">{error}</p>}
       {notice && <p className="notice ok small">{notice}</p>}
-      {data.configured && !editing && (
+      {data.configured && !editing && !signingIn && (
         <>
           <div className="facts">
             <div className="kv"><span>Region</span><span>{AMAZON_REGION_LABEL[data.region]}</span></div>
             <div className="kv"><span>Marktplätze</span><span>{data.marketplaceIds.map((id) => AMAZON_MARKETPLACES.find((m) => m.id === id)?.label ?? id).join(", ")}</span></div>
             <div className="kv"><span>Verkäufer-ID</span><code>{data.sellerIdHint}</code></div>
-            <div className="kv"><span>LWA Client-ID</span><code>{data.clientIdHint}</code></div>
-            <div className="kv"><span>Client-Secret, Refresh-Token</span><span>hinterlegt</span></div>
+            {viaApp ? (
+              <div className="kv"><span>Zugang</span><span>Anmeldung bei Amazon, Refresh-Token hinterlegt</span></div>
+            ) : (
+              <>
+                <div className="kv"><span>LWA Client-ID</span><code>{data.clientIdHint}</code></div>
+                <div className="kv"><span>Client-Secret, Refresh-Token</span><span>hinterlegt</span></div>
+              </>
+            )}
             {data.lastCheckedAt && <div className="kv"><span>Geprüft</span><span>{fmtDate(data.lastCheckedAt)}</span></div>}
           </div>
           {data.lastError && <p className="notice bad small">{data.lastError}</p>}
@@ -65,18 +78,24 @@ export function AmazonListingsCard({ base, owner }: { base: string; owner: boole
                 }} />
               Erstattungen aus dem Fall erlauben
             </label>
-            <span className="muted small">Gibt dem Kunden bei Amazon Geld zurück (Erstattung über die Bestellung). Braucht zusätzlich die Rolle „Inventory and Order Tracking“ in der SP-API-App; nach dem Hinzufügen der Rolle muss der Verkäufer die App neu autorisieren und den neuen Refresh-Token hier unter „Ändern“ eintragen.</span>
+            <span className="muted small">{viaApp
+              ? "Gibt dem Kunden bei Amazon Geld zurück (Erstattung über die Bestellung). Braucht die Rolle „Inventory and Order Tracking“ der App; kam sie später dazu, einmal „Neu anmelden“."
+              : "Gibt dem Kunden bei Amazon Geld zurück (Erstattung über die Bestellung). Braucht zusätzlich die Rolle „Inventory and Order Tracking“ in der SP-API-App; nach dem Hinzufügen der Rolle muss der Verkäufer die App neu autorisieren und den neuen Refresh-Token hier unter „Ändern“ eintragen."}</span>
           </div>
           {owner && (
             <div className="row wrap">
               <button className={connected ? "" : "primary"} onClick={() => void run(() => api("POST", `${base}/amazon-listings/check`), (r) => { const x = r as { ok: boolean; detail: string }; return `${x.ok ? "Verbindung in Ordnung" : "Prüfung fehlgeschlagen"}: ${x.detail}`; })}>Verbindung testen</button>
-              <button onClick={() => setEditing(true)}>Ändern</button>
+              {data.operatorApp && <button onClick={() => setSigningIn(true)}>Neu anmelden</button>}
+              {!viaApp && <button onClick={() => setEditing(true)}>Ändern</button>}
               <button className="danger" onClick={() => { if (window.confirm("Amazon-Zugang entfernen? Angebote lassen sich dann nicht mehr aus dem Fall deaktivieren. Bei Amazon ändert sich nichts.")) void run(() => api("DELETE", `${base}/amazon-listings`), () => "Amazon-Zugang entfernt."); }}>Entfernen</button>
             </div>
           )}
         </>
       )}
-      {owner && (!data.configured || editing) && (
+      {owner && data.operatorApp && (!data.configured || signingIn) && (
+        <AmazonSignIn current={data.configured ? data : null} onSubmit={signIn} onCancel={data.configured ? () => setSigningIn(false) : undefined} />
+      )}
+      {owner && ((!data.configured && !data.operatorApp) || editing) && (
         <AmazonForm
           current={data.configured ? data : null}
           onCancel={data.configured ? () => setEditing(false) : undefined}
@@ -85,6 +104,37 @@ export function AmazonListingsCard({ base, owner }: { base: string; owner: boole
       )}
       {!owner && !data.configured && <p className="small muted">Nur Inhaber können den Zugang eintragen.</p>}
     </section>
+  );
+}
+
+/** Region and marketplaces, then off to Seller Central with the installation's own app. */
+function AmazonSignIn({ current, onSubmit, onCancel }: {
+  current: Extract<Settings, { configured: true }> | null; onSubmit: (body: { region: AmazonRegion; marketplaceIds: string[] }) => void; onCancel?: () => void;
+}) {
+  const [region, setRegion] = useState<AmazonRegion>(current?.region ?? "eu");
+  const [markets, setMarkets] = useState<string[]>(current?.marketplaceIds ?? ["A1PA6795UKMFR9"]);
+  const inRegion = AMAZON_MARKETPLACES.filter((m) => m.region === region);
+  const chosen = markets.filter((m) => inRegion.some((x) => x.id === m));
+  const toggle = (id: string) => setMarkets((ms) => (ms.includes(id) ? ms.filter((x) => x !== id) : [...ms, id]));
+  return (
+    <form className="stack" onSubmit={(e) => { e.preventDefault(); onSubmit({ region, marketplaceIds: chosen }); }}>
+      <label>Region
+        <select value={region} onChange={(e) => setRegion(e.target.value as AmazonRegion)}>
+          {(Object.keys(AMAZON_REGION_LABEL) as AmazonRegion[]).map((r) => <option key={r} value={r}>{AMAZON_REGION_LABEL[r]}</option>)}
+        </select>
+      </label>
+      <fieldset className="stack">
+        <legend className="small">Marktplätze</legend>
+        <div className="row wrap">
+          {inRegion.map((m) => <label key={m.id} className="row small"><input type="checkbox" checked={markets.includes(m.id)} onChange={() => toggle(m.id)} /> {m.label}</label>)}
+        </div>
+      </fieldset>
+      <p className="muted small">Du wirst zu Amazon Seller Central weitergeleitet, meldest dich dort mit dem Verkäuferkonto an und bestätigst den Zugriff. Danach kommst du hierher zurück.</p>
+      <div className="row">
+        <button type="submit" className="primary" disabled={chosen.length === 0}>Bei Amazon anmelden</button>
+        {onCancel && <button type="button" onClick={onCancel}>Abbrechen</button>}
+      </div>
+    </form>
   );
 }
 

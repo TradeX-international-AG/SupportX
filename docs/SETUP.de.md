@@ -134,6 +134,10 @@ Versand freischalten wie in Abschnitt 8, mit einer kontrollierten Testantwort im
 
 Damit lässt sich im Fall ein falsches Amazon-Angebot schließen (z. B. Angebot zeigt 2 statt 1 Flasche). Nachrichten von Amazon laufen weiter über das Postfach; dieser Zugang dient nur dieser einen Aktion.
 
+**Mit eigener App der Installation (Standard für Betreiber):** In der `.env` `AMAZON_SP_APP_ID`, `AMAZON_SP_CLIENT_ID` und `AMAZON_SP_CLIENT_SECRET` setzen (App-ID und „Anmeldedaten für Login mit Amazon“ aus dem Solution Provider Portal), solange die App bei Amazon ein Entwurf ist zusätzlich `AMAZON_SP_APP_DRAFT=true`. In der App als OAuth-Login-URI `<PUBLIC_BASE_URL>/oauth/amazon/login` und als OAuth-Redirect-URI `<PUBLIC_BASE_URL>/oauth/amazon/callback` eintragen. Dann wählt der Händler unter **Einstellungen → Marktplätze → Amazon-Angebote** Region und Marktplätze und klickt **„Bei Amazon anmelden“**; Verkäufer-ID und Refresh-Token kommen aus der Anmeldung, Client-ID und Secret bleiben auf dem Server. Kommt eine Rolle später dazu (z. B. für Erstattungen), einmal „Neu anmelden“.
+
+**Ohne App der Installation (Selbst-Hoster mit eigener App):** wie folgt.
+
 1. **SP-API-App** (Developer Central des Betreibers): Die App braucht die Rolle **„Product Listing“**. Eine bestehende private oder öffentliche App kann genutzt werden, wenn sie diese Rolle hat. Client-ID und Client-Secret stehen unter „LWA-Zugangsdaten“.
 2. **Autorisierung durch den Verkäufer:** Der Verkäufer autorisiert die App einmal für sein Verkäuferkonto (Seller Central → Apps und Services → Apps entwickeln bzw. Autorisierungslink der App). Dabei entsteht der **Refresh-Token** (beginnt mit `Atzr|`).
 3. **Verkäufer-ID** (Händlertoken): Seller Central → Einstellungen → Kontoinformationen → Händlertoken.

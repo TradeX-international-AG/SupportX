@@ -31,6 +31,14 @@ const schema = z.object({
   EBAY_CLIENT_ID: z.string().trim().min(1).optional(),
   EBAY_CLIENT_SECRET: z.string().trim().min(1).optional(),
   EBAY_RU_NAME: z.string().trim().min(1).optional(),
+  // Amazon SP-API app of this installation's operator (Solution Provider Portal: app ID,
+  // LWA client ID and secret). Set all three and merchants only click "Bei Amazon
+  // anmelden"; without them every merchant enters an own app in the settings.
+  AMAZON_SP_APP_ID: z.string().trim().min(1).optional(),
+  AMAZON_SP_CLIENT_ID: z.string().trim().min(1).optional(),
+  AMAZON_SP_CLIENT_SECRET: z.string().trim().min(1).optional(),
+  // true while the app is still a draft at Amazon (consent then carries version=beta).
+  AMAZON_SP_APP_DRAFT: bool.default(false),
 });
 
 export type AppConfig = z.infer<typeof schema>;
@@ -45,6 +53,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const config = parsed.data;
   const ebay = [config.EBAY_CLIENT_ID, config.EBAY_CLIENT_SECRET, config.EBAY_RU_NAME].filter(Boolean).length;
   if (ebay !== 0 && ebay !== 3) throw new Error("eBay-Zugang der Installation unvollständig: EBAY_CLIENT_ID, EBAY_CLIENT_SECRET und EBAY_RU_NAME gehören zusammen.");
+  const amazon = [config.AMAZON_SP_APP_ID, config.AMAZON_SP_CLIENT_ID, config.AMAZON_SP_CLIENT_SECRET].filter(Boolean).length;
+  if (amazon !== 0 && amazon !== 3) throw new Error("Amazon-Zugang der Installation unvollständig: AMAZON_SP_APP_ID, AMAZON_SP_CLIENT_ID und AMAZON_SP_CLIENT_SECRET gehören zusammen.");
   if (config.AI_PROVIDER === "claude" && !config.ANTHROPIC_API_KEY) {
     throw new Error("AI_PROVIDER=claude benötigt ANTHROPIC_API_KEY.");
   }
@@ -55,4 +65,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 export function operatorEbayApp(config: Pick<AppConfig, "EBAY_CLIENT_ID" | "EBAY_CLIENT_SECRET" | "EBAY_RU_NAME">): { clientId: string; clientSecret: string; ruName: string } | null {
   if (!config.EBAY_CLIENT_ID || !config.EBAY_CLIENT_SECRET || !config.EBAY_RU_NAME) return null;
   return { clientId: config.EBAY_CLIENT_ID, clientSecret: config.EBAY_CLIENT_SECRET, ruName: config.EBAY_RU_NAME };
+}
+
+/** The operator's Amazon SP-API app, or null when merchants bring their own. Server only, never sent to the browser. */
+export function operatorAmazonApp(config: Pick<AppConfig, "AMAZON_SP_APP_ID" | "AMAZON_SP_CLIENT_ID" | "AMAZON_SP_CLIENT_SECRET" | "AMAZON_SP_APP_DRAFT">): { appId: string; clientId: string; clientSecret: string; draft: boolean } | null {
+  if (!config.AMAZON_SP_APP_ID || !config.AMAZON_SP_CLIENT_ID || !config.AMAZON_SP_CLIENT_SECRET) return null;
+  return { appId: config.AMAZON_SP_APP_ID, clientId: config.AMAZON_SP_CLIENT_ID, clientSecret: config.AMAZON_SP_CLIENT_SECRET, draft: config.AMAZON_SP_APP_DRAFT };
 }

@@ -25,6 +25,7 @@ export async function purgeWorkspace(tx: Tx, workspaceId: string): Promise<void>
     "DELETE FROM channel_connections WHERE workspace_id = $1",
     "DELETE FROM erp_connections WHERE workspace_id = $1",
     "DELETE FROM amazon_listing_connections WHERE workspace_id = $1",
+    "DELETE FROM amazon_oauth_states WHERE workspace_id = $1",
     "DELETE FROM merchant_accounts WHERE workspace_id = $1",
     "DELETE FROM jobs WHERE workspace_id = $1",
     "DELETE FROM workspaces WHERE id = $1",
