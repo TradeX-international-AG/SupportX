@@ -34,6 +34,7 @@ describe("Bei Amazon anmelden (App der Installation)", () => {
     h = await createHarness();
     const s = await seedWorkspace(h);
     const cfg = h.ctx.config as unknown as Record<string, unknown>;
+    const agentId = (s.agent as { userId: string }).userId;
 
     // Without the operator app the merchant form stays the only way.
     assert.equal((await getAmazonListingSettings(h.ctx, s.owner)).operatorApp, false);
@@ -53,7 +54,7 @@ describe("Bei Amazon anmelden (App der Installation)", () => {
 
     // Login step: only Seller Central may be the way back.
     await code(continueAmazonConsent(h.ctx, s.ownerUserId, { amazonCallbackUri: "https://evil.example/apps/authorize/confirm", amazonState: "x" }), "INVALID");
-    await code(continueAmazonConsent(h.ctx, s.agent.userId, { amazonCallbackUri: "https://sellercentral-europe.amazon.com/apps/authorize/confirm/x", amazonState: "amz" }), "INVALID_STATE");
+    await code(continueAmazonConsent(h.ctx, agentId, { amazonCallbackUri: "https://sellercentral-europe.amazon.com/apps/authorize/confirm/x", amazonState: "amz" }), "INVALID_STATE");
     const back = new URL(await continueAmazonConsent(h.ctx, s.ownerUserId, { amazonCallbackUri: "https://sellercentral-europe.amazon.com/apps/authorize/confirm/amzn1.sp.solution.test-app", amazonState: "amz-state-1" }));
     assert.equal(back.hostname, "sellercentral-europe.amazon.com");
     assert.equal(back.searchParams.get("amazon_state"), "amz-state-1");
@@ -63,7 +64,7 @@ describe("Bei Amazon anmelden (App der Installation)", () => {
     assert.ok(state && state !== consent.searchParams.get("state"));
 
     // Another signed-in person cannot finish it.
-    await code(completeAmazonConsent(h.ctx, s.agent.userId!, { code: "c", state, sellingPartnerId: SELLER }, fakeLwa([])), "FORBIDDEN");
+    await code(completeAmazonConsent(h.ctx, agentId, { code: "c", state, sellingPartnerId: SELLER }, fakeLwa([])), "FORBIDDEN");
 
     const seen: URLSearchParams[] = [];
     const done = await completeAmazonConsent(h.ctx, s.ownerUserId, { code: "spapi-code-1", state, sellingPartnerId: SELLER }, fakeLwa(seen));
