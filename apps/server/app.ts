@@ -51,6 +51,8 @@ import { checkDhlConnection, deleteDhlConnection, getDhlSettings, saveDhlConnect
 import { createPhoneToken, deletePhoneConnection, getPhoneSettings, handlePhoneWebhook, phoneInvoiceRequest, phoneOrderStatus, savePhoneSettings, workspaceForToolToken } from "../../packages/services/phone.ts";
 import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection, setAmazonRefundsEnabled } from "../../packages/services/amazon-listings.ts";
 import { createCreditNote, lookupCreditNote, setCreditNotesEnabled, settleUncertainCreditNote } from "../../packages/services/credit-notes.ts";
+import { completeAmazonConsent, startAmazonConsent } from "../../packages/services/amazon-oauth.ts";
+import { AMAZON_CALLBACK_PATH, AMAZON_LOGIN_PATH } from "../../packages/connectors/amazon/oauth.ts";
 import { checkAmazonRefund, issueAmazonRefund, lookupAmazonRefundOrder, settleUncertainAmazonRefund } from "../../packages/services/amazon-refunds.ts";
 import { batchCandidates, sendMany } from "../../packages/services/batch.ts";
 import { supportReport } from "../../packages/services/reports.ts";
@@ -74,7 +76,9 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 }
 
 export async function buildServer(ctx: AppContext, opts: { logger?: boolean; ebayFetch?: typeof fetch } = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 1_000_000, trustProxy: true });
+  // OAuth redirects carry single-use codes in the query: keep them out of the request log.
+  const logger = opts.logger ? { serializers: { req: (req: { method: string; url: string }) => ({ method: req.method, url: req.url.startsWith("/oauth/") ? req.url.split("?")[0] : req.url }) } } : false;
+  const app = Fastify({ logger, bodyLimit: 1_000_000, trustProxy: true });
   await app.register(cookie);
 
   app.setErrorHandler((error, _req, reply) => {
@@ -551,6 +555,39 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
   app.put("/api/w/:ws/amazon-listings/refunds", async (req) => {
     await setAmazonRefundsEnabled(ctx, await actor(req), parse(z.object({ enabled: z.boolean() }), req.body).enabled);
     return { ok: true };
+  });
+  // "Mit Amazon verbinden" (operator's SP-API app). Returns the Seller Central URL to open.
+  app.post("/api/w/:ws/amazon-listings/authorize", async (req) => {
+    const body = parse(z.object({ region: z.string().max(4), marketplaceIds: z.array(z.string().max(20)).min(1).max(20), amazonCallbackUri: z.string().max(2000).optional(), amazonState: z.string().max(2000).optional() }), req.body);
+    return startAmazonConsent(ctx, await actor(req), body);
+  });
+  // Login URI from the app registration: Amazon opens it when the authorization starts in
+  // Seller Central or the Appstore. Like the eBay callback, the SameSite=strict session
+  // cookie is absent here, so the web app continues with a normal API call.
+  app.get(AMAZON_LOGIN_PATH, async (req, reply) => {
+    const q = req.query as { amazon_callback_uri?: string; amazon_state?: string; selling_partner_id?: string };
+    const params = new URLSearchParams();
+    if (q.amazon_callback_uri && q.amazon_state) {
+      params.set("amazon_callback_uri", q.amazon_callback_uri.slice(0, 2000));
+      params.set("amazon_state", q.amazon_state.slice(0, 2000));
+      if (q.selling_partner_id) params.set("selling_partner_id", q.selling_partner_id.slice(0, 40));
+    } else params.set("amazon_error", "unvollständig");
+    return reply.redirect(`/?${params.toString()}`);
+  });
+  // Redirect URI from the app registration: Amazon sends the authorization code here.
+  app.get(AMAZON_CALLBACK_PATH, async (req, reply) => {
+    const q = req.query as { spapi_oauth_code?: string; state?: string; selling_partner_id?: string; error?: string; error_description?: string };
+    const params = new URLSearchParams();
+    if (q.spapi_oauth_code && q.state && q.selling_partner_id) {
+      params.set("amazon_code", q.spapi_oauth_code.slice(0, 2000));
+      params.set("amazon_oauth_state", q.state.slice(0, 200));
+      params.set("selling_partner_id", q.selling_partner_id.slice(0, 40));
+    } else params.set("amazon_error", (q.error ?? "abgebrochen").slice(0, 100));
+    return reply.redirect(`/?${params.toString()}`);
+  });
+  app.post("/api/oauth/amazon/complete", async (req) => {
+    const body = parse(z.object({ code: z.string().min(1).max(2000), state: z.string().min(1).max(200), sellingPartnerId: z.string().min(1).max(40) }), req.body);
+    return completeAmazonConsent(ctx, req.userId!, body);
   });
   app.post("/api/w/:ws/amazon-listings/check", async (req) => checkAmazonListingConnection(ctx, await actor(req)));
   // DHL Shipment Tracking (owner). The key is never returned, only "••••abcd".

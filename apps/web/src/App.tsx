@@ -5,6 +5,7 @@ import { Refunds } from "./Refunds.tsx";
 import { Report } from "./Report.tsx";
 import { Settings } from "./Settings.tsx";
 import { parseSettingsTab, settingsHash } from "./settings-tabs.ts";
+import { AMAZON_LOGIN_KEY } from "./AmazonListingsSettings.tsx";
 
 interface Me {
   user: { id: string; email: string; display_name: string };
@@ -117,6 +118,39 @@ export function App() {
     api<{ sellerUsername: string }>("POST", "/api/oauth/ebay/complete", { code, state })
       .then((r) => setOauthNotice(`eBay-Konto ${r.sellerUsername} verbunden. Nachrichten werden jetzt abgerufen, Antworten bleiben Entwürfe.`))
       .catch((error: Error) => setOauthNotice(`eBay-Anmeldung fehlgeschlagen: ${error.message}`));
+  }, [me]);
+
+  // Return from Amazon (website authorization). Login URI: Amazon started the
+  // authorization in Seller Central; the Amazon card asks for region and
+  // marketplaces and continues. Redirect URI: finish with a same-origin API call.
+  useEffect(() => {
+    if (!me) return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("amazon_code");
+    const state = params.get("amazon_oauth_state");
+    const sellingPartnerId = params.get("selling_partner_id");
+    const callbackUri = params.get("amazon_callback_uri");
+    const amazonState = params.get("amazon_state");
+    const failed = params.get("amazon_error");
+    if (!code && !callbackUri && !failed) return;
+    window.history.replaceState(null, "", `${window.location.pathname}${settingsHash("marktplaetze")}`);
+    setView("settings");
+    if (callbackUri && amazonState) {
+      try { sessionStorage.setItem(AMAZON_LOGIN_KEY, JSON.stringify({ amazonCallbackUri: callbackUri, amazonState })); } catch { /* storage off: the card cannot continue */ }
+      setOauthNotice("Amazon möchte SupportX freigeben. Bitte unten bei „Amazon-Angebote“ Region und Marktplätze wählen und „Freigabe fortsetzen“ klicken.");
+      window.dispatchEvent(new Event(AMAZON_LOGIN_KEY));
+      return;
+    }
+    if (failed || !code || !state || !sellingPartnerId) {
+      setOauthNotice(`Amazon-Freigabe nicht abgeschlossen (${failed ?? "unvollständig"}).`);
+      return;
+    }
+    api<{ sellerIdHint: string }>("POST", "/api/oauth/amazon/complete", { code, state, sellingPartnerId })
+      .then((r) => {
+        setOauthNotice(`Amazon-Verkäuferkonto ${r.sellerIdHint} verbunden. Bitte unten bei „Amazon-Angebote“ einmal „Verbindung testen“.`);
+        window.dispatchEvent(new Event(AMAZON_LOGIN_KEY));
+      })
+      .catch((error: Error) => setOauthNotice(`Amazon-Freigabe fehlgeschlagen: ${error.message}`));
   }, [me]);
 
   if (loading) return <div className="center muted">Lädt …</div>;

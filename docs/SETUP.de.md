@@ -44,7 +44,7 @@ docker compose -f deploy/docker-compose.prod.yml --env-file .env exec -e SUPPORT
   node --import tsx scripts/create-admin.ts --email sie@firma.de --name "Ihr Name" --workspace "Firma GmbH"
 ```
 
-Caddy holt das HTTPS-Zertifikat automatisch (Ports 80 und 443 müssen frei und in der Firewall offen sein). Läuft auf dem Server schon ein anderer Webserver auf 80/443, den Caddy-Dienst weglassen und dort einen Proxy auf Port 3000 des `server`-Containers einrichten. Sicherung: `deploy/backup.sh` täglich per cron; Update: `git pull` und derselbe `up -d --build`-Befehl (Migrationen laufen beim Start).
+Caddy holt das HTTPS-Zertifikat automatisch (Ports 80 und 443 müssen frei und in der Firewall offen sein). Läuft auf dem Server schon ein anderer Webserver auf 80/443, stattdessen `deploy/docker-compose.shared-proxy.yml` nehmen: gleicher Stack ohne Caddy, der `server`-Container hängt zusätzlich im Docker-Netz des vorhandenen Proxys (`PROXY_NETWORK`, Standard `tradex_edge`) unter dem Namen `supportx-server`. Im Proxy die Domain auf `supportx-server:3000` leiten (Vorlage für Caddy: `deploy/caddy-sites/supportx.caddy`); für automatische Updates `SUPPORTX_COMPOSE_FILE=deploy/docker-compose.shared-proxy.yml` in `supportx-update.service` setzen. Sicherung: `deploy/backup.sh` täglich per cron; Update: `git pull` und derselbe `up -d --build`-Befehl (Migrationen laufen beim Start).
 
 **Automatische Updates (optional):** Der Server holt sich neue Stände selbst von einem Zweig (Standard `live`) und startet neu. So lässt sich bestimmen, wann ein Stand live geht: Wer den Zweig `live` nachzieht, spielt ein. Ändert man auf dem Server von Hand versionierte Dateien, gehen diese Änderungen beim nächsten Update verloren; `.env`, Theme und Sicherungen bleiben.
 
@@ -133,6 +133,10 @@ Versand freischalten wie in Abschnitt 8, mit einer kontrollierten Testantwort im
 ## 6b. Amazon-Angebote deaktivieren (optional, Selling Partner API)
 
 Damit lässt sich im Fall ein falsches Amazon-Angebot schließen (z. B. Angebot zeigt 2 statt 1 Flasche). Nachrichten von Amazon laufen weiter über das Postfach; dieser Zugang dient nur dieser einen Aktion.
+
+**Mit Amazon verbinden (empfohlen):** Hat der Betreiber eine eigene SP-API-App, trägt er in der `.env` des Servers `AMAZON_SPAPI_APP_ID`, `AMAZON_LWA_CLIENT_ID` und `AMAZON_LWA_CLIENT_SECRET` ein (Developer Central → App → „Anmeldedaten für Login mit Amazon“ → Anzeigen; solange die App ein Entwurf ist zusätzlich `AMAZON_SPAPI_DRAFT=true`) und startet den Server neu. In der App-Registrierung stehen als OAuth-Anmelde-URI `<öffentliche Adresse>/oauth/amazon/login` und als Umleitungs-URI `<öffentliche Adresse>/oauth/amazon/callback`. Danach klickt der Inhaber unter **Einstellungen → Marktplätze → Amazon-Angebote** auf **„Mit Amazon verbinden“**, wählt Region und Marktplätze und gibt SupportX in Seller Central frei; Verkäufer-ID und Refresh-Token trägt SupportX selbst ein. Startet die Freigabe in Seller Central oder im Appstore, fragt SupportX nach dem Anmelden nach Region und Marktplätzen und schickt zurück zu Amazon. Bisher nur gegen einen lokalen Testdouble geprüft.
+
+Ohne eigene App des Betreibers den Zugang von Hand eintragen:
 
 1. **SP-API-App** (Developer Central des Betreibers): Die App braucht die Rolle **„Product Listing“**. Eine bestehende private oder öffentliche App kann genutzt werden, wenn sie diese Rolle hat. Client-ID und Client-Secret stehen unter „LWA-Zugangsdaten“.
 2. **Autorisierung durch den Verkäufer:** Der Verkäufer autorisiert die App einmal für sein Verkäuferkonto (Seller Central → Apps und Services → Apps entwickeln bzw. Autorisierungslink der App). Dabei entsteht der **Refresh-Token** (beginnt mit `Atzr|`).

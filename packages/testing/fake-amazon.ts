@@ -50,7 +50,7 @@ export interface FakeAmazon {
   close(): Promise<void>;
 }
 
-export async function startFakeAmazon(opts: { sellerId: string; clientId: string; clientSecret: string; refreshToken: string; listings: FakeListing[]; orders?: FakeOrder[]; port?: number }): Promise<FakeAmazon> {
+export async function startFakeAmazon(opts: { sellerId: string; clientId: string; clientSecret: string; refreshToken: string; listings: FakeListing[]; orders?: FakeOrder[]; port?: number; authorization?: { code: string; redirectUri: string } }): Promise<FakeAmazon> {
   const accessToken = "Atza|fake-access";
   const state: Omit<FakeAmazon, "url" | "tokenUrl" | "close"> = { listings: opts.listings, requests: [], fault: { patch: "none", feed: "none" }, orders: opts.orders ?? [], feeds: [] };
   const documents = new Map<string, string>();
@@ -73,6 +73,12 @@ export async function startFakeAmazon(opts: { sellerId: string; clientId: string
 
     if (url.pathname === "/auth/o2/token") {
       const form = new URLSearchParams(raw);
+      // Website authorization: the single-use code from the consent becomes the refresh token.
+      if (form.get("grant_type") === "authorization_code" && opts.authorization && form.get("client_id") === opts.clientId && form.get("client_secret") === opts.clientSecret) {
+        if (form.get("code") !== opts.authorization.code || form.get("redirect_uri") !== opts.authorization.redirectUri) return send(res, 400, { error: "invalid_grant", error_description: "The request has an invalid grant parameter : code" });
+        opts.authorization = undefined;
+        return send(res, 200, { access_token: accessToken, refresh_token: opts.refreshToken, token_type: "bearer", expires_in: 3600 });
+      }
       if (form.get("grant_type") !== "refresh_token" || form.get("client_id") !== opts.clientId || form.get("client_secret") !== opts.clientSecret) return send(res, 401, { error: "invalid_client", error_description: "Client authentication failed" });
       if (form.get("refresh_token") !== opts.refreshToken) return send(res, 400, { error: "invalid_grant", error_description: "The request has an invalid grant parameter : refresh_token" });
       return send(res, 200, { access_token: accessToken, token_type: "bearer", expires_in: 3600 });
