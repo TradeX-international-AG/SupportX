@@ -2,9 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 import { api, fmtDate } from "./api.ts";
 import { AMAZON_MARKETPLACES, AMAZON_REGION_LABEL, type AmazonRegion } from "../../../packages/core/amazon-marketplaces.ts";
 
+/** sessionStorage key (and window event) for an authorization Amazon started in Seller Central. */
+export const AMAZON_LOGIN_KEY = "supportx-amazon-login";
+
+function pendingAmazonLogin(): { amazonCallbackUri: string; amazonState: string } | null {
+  try {
+    const raw = sessionStorage.getItem(AMAZON_LOGIN_KEY);
+    return raw ? (JSON.parse(raw) as { amazonCallbackUri: string; amazonState: string }) : null;
+  } catch {
+    return null;
+  }
+}
+
 type Settings =
-  | { configured: false }
-  | { configured: true; region: AmazonRegion; sellerIdHint: string; clientIdHint: string; marketplaceIds: string[]; status: string; lastCheckedAt: string | null; lastError: string | null; refundsEnabled: boolean };
+  | { configured: false; oauthAvailable: boolean }
+  | { configured: true; oauthAvailable: boolean; region: AmazonRegion; sellerIdHint: string; clientIdHint: string; marketplaceIds: string[]; status: string; lastCheckedAt: string | null; lastError: string | null; refundsEnabled: boolean };
 
 /**
  * Settings card for the Amazon Selling Partner API access that lets a person
@@ -16,8 +28,26 @@ export function AmazonListingsCard({ base, owner }: { base: string; owner: boole
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [fromAmazon, setFromAmazon] = useState(pendingAmazonLogin);
   const load = useCallback(() => api<Settings>("GET", `${base}/amazon-listings`).then(setData, (e: Error) => setError(e.message)), [base]);
   useEffect(() => void load(), [load]);
+  useEffect(() => {
+    const changed = () => { setFromAmazon(pendingAmazonLogin()); void load(); };
+    window.addEventListener(AMAZON_LOGIN_KEY, changed);
+    return () => window.removeEventListener(AMAZON_LOGIN_KEY, changed);
+  }, [load]);
+  // Opens Seller Central; Amazon comes back to /oauth/amazon/callback.
+  const authorize = async (body: { region: AmazonRegion; marketplaceIds: string[] }) => {
+    setError(null); setNotice(null);
+    try {
+      const r = await api<{ url: string }>("POST", `${base}/amazon-listings/authorize`, { ...body, ...(fromAmazon ?? {}) });
+      try { sessionStorage.removeItem(AMAZON_LOGIN_KEY); } catch { /* ignore */ }
+      window.location.assign(r.url);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   const run = async (fn: () => Promise<unknown>, ok: (r: unknown) => string) => {
     setError(null); setNotice(null);
@@ -76,7 +106,21 @@ export function AmazonListingsCard({ base, owner }: { base: string; owner: boole
           )}
         </>
       )}
-      {owner && (!data.configured || editing) && (
+      {owner && data.oauthAvailable && (fromAmazon || consent) && (
+        <ConsentForm
+          current={data.configured ? data : null}
+          fromAmazon={!!fromAmazon}
+          onCancel={() => { setConsent(false); setFromAmazon(null); try { sessionStorage.removeItem(AMAZON_LOGIN_KEY); } catch { /* ignore */ } }}
+          onSubmit={(body) => void authorize(body)}
+        />
+      )}
+      {owner && data.oauthAvailable && !fromAmazon && !consent && (!data.configured || !editing) && (
+        <div className="row wrap">
+          <button className={data.configured ? "" : "primary"} onClick={() => setConsent(true)}>{data.configured ? "Bei Amazon neu freigeben" : "Mit Amazon verbinden"}</button>
+          <span className="muted small">Öffnet Seller Central. Nach der Freigabe trägt SupportX den Zugang selbst ein.</span>
+        </div>
+      )}
+      {owner && (!data.configured || editing) && !consent && !fromAmazon && (
         <AmazonForm
           current={data.configured ? data : null}
           onCancel={data.configured ? () => setEditing(false) : undefined}
@@ -136,6 +180,36 @@ function AmazonForm({ current, onSubmit, onCancel }: {
       <div className="row">
         <button type="submit" className="primary">Speichern</button>
         {onCancel && <button type="button" onClick={onCancel}>Abbrechen</button>}
+      </div>
+    </form>
+  );
+}
+
+function ConsentForm({ current, fromAmazon, onSubmit, onCancel }: {
+  current: Extract<Settings, { configured: true }> | null; fromAmazon: boolean; onSubmit: (body: { region: AmazonRegion; marketplaceIds: string[] }) => void; onCancel: () => void;
+}) {
+  const [region, setRegion] = useState<AmazonRegion>(current?.region ?? "eu");
+  const [markets, setMarkets] = useState<string[]>(current?.marketplaceIds ?? ["A1PA6795UKMFR9"]);
+  const inRegion = AMAZON_MARKETPLACES.filter((m) => m.region === region);
+  const toggle = (id: string) => setMarkets((ms) => (ms.includes(id) ? ms.filter((x) => x !== id) : [...ms, id]));
+  const chosen = markets.filter((m) => inRegion.some((x) => x.id === m));
+  return (
+    <form className="stack" onSubmit={(e) => { e.preventDefault(); onSubmit({ region, marketplaceIds: chosen }); }}>
+      <p className="small">{fromAmazon ? "Amazon hat die Freigabe in Seller Central gestartet. Wähle, für welche Marktplätze SupportX den Zugang nutzen darf, dann geht es zurück zu Amazon." : "Du wirst zu Seller Central weitergeleitet und gibst SupportX dort frei. Danach kommst du hierher zurück."}</p>
+      <label>Region
+        <select value={region} onChange={(e) => setRegion(e.target.value as AmazonRegion)}>
+          {(Object.keys(AMAZON_REGION_LABEL) as AmazonRegion[]).map((r) => <option key={r} value={r}>{AMAZON_REGION_LABEL[r]}</option>)}
+        </select>
+      </label>
+      <fieldset className="stack">
+        <legend className="small">Marktplätze, auf denen SupportX den Zugang nutzen darf</legend>
+        <div className="row wrap">
+          {inRegion.map((m) => <label key={m.id} className="row small"><input type="checkbox" checked={markets.includes(m.id)} onChange={() => toggle(m.id)} /> {m.label}</label>)}
+        </div>
+      </fieldset>
+      <div className="row">
+        <button type="submit" className="primary" disabled={chosen.length === 0}>{fromAmazon ? "Freigabe fortsetzen" : "Weiter zu Amazon"}</button>
+        <button type="button" onClick={onCancel}>Abbrechen</button>
       </div>
     </form>
   );

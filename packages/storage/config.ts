@@ -31,6 +31,14 @@ const schema = z.object({
   EBAY_CLIENT_ID: z.string().trim().min(1).optional(),
   EBAY_CLIENT_SECRET: z.string().trim().min(1).optional(),
   EBAY_RU_NAME: z.string().trim().min(1).optional(),
+  // Amazon SP-API app of this installation's operator (Developer Central: App ID and
+  // "Login with Amazon" credentials). Set all three and owners only click
+  // "Mit Amazon verbinden"; without them the access is entered by hand.
+  AMAZON_SPAPI_APP_ID: z.string().trim().regex(/^amzn1\.sp\.solution\.[A-Za-z0-9-]+$/, "beginnt mit amzn1.sp.solution.").optional(),
+  AMAZON_LWA_CLIENT_ID: z.string().trim().min(1).optional(),
+  AMAZON_LWA_CLIENT_SECRET: z.string().trim().min(1).optional(),
+  // The app is still a draft in Developer Central: consent URLs need version=beta.
+  AMAZON_SPAPI_DRAFT: bool.default(false),
 });
 
 export type AppConfig = z.infer<typeof schema>;
@@ -45,6 +53,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const config = parsed.data;
   const ebay = [config.EBAY_CLIENT_ID, config.EBAY_CLIENT_SECRET, config.EBAY_RU_NAME].filter(Boolean).length;
   if (ebay !== 0 && ebay !== 3) throw new Error("eBay-Zugang der Installation unvollständig: EBAY_CLIENT_ID, EBAY_CLIENT_SECRET und EBAY_RU_NAME gehören zusammen.");
+  const amazon = [config.AMAZON_SPAPI_APP_ID, config.AMAZON_LWA_CLIENT_ID, config.AMAZON_LWA_CLIENT_SECRET].filter(Boolean).length;
+  if (amazon !== 0 && amazon !== 3) throw new Error("Amazon-App der Installation unvollständig: AMAZON_SPAPI_APP_ID, AMAZON_LWA_CLIENT_ID und AMAZON_LWA_CLIENT_SECRET gehören zusammen.");
   if (config.AI_PROVIDER === "claude" && !config.ANTHROPIC_API_KEY) {
     throw new Error("AI_PROVIDER=claude benötigt ANTHROPIC_API_KEY.");
   }
@@ -55,4 +65,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 export function operatorEbayApp(config: Pick<AppConfig, "EBAY_CLIENT_ID" | "EBAY_CLIENT_SECRET" | "EBAY_RU_NAME">): { clientId: string; clientSecret: string; ruName: string } | null {
   if (!config.EBAY_CLIENT_ID || !config.EBAY_CLIENT_SECRET || !config.EBAY_RU_NAME) return null;
   return { clientId: config.EBAY_CLIENT_ID, clientSecret: config.EBAY_CLIENT_SECRET, ruName: config.EBAY_RU_NAME };
+}
+
+/** The operator's Amazon SP-API app, or null when owners enter the access by hand. Server only. */
+export function operatorAmazonApp(config: Pick<AppConfig, "AMAZON_SPAPI_APP_ID" | "AMAZON_LWA_CLIENT_ID" | "AMAZON_LWA_CLIENT_SECRET" | "AMAZON_SPAPI_DRAFT">): { appId: string; clientId: string; clientSecret: string; draft: boolean } | null {
+  if (!config.AMAZON_SPAPI_APP_ID || !config.AMAZON_LWA_CLIENT_ID || !config.AMAZON_LWA_CLIENT_SECRET) return null;
+  return { appId: config.AMAZON_SPAPI_APP_ID, clientId: config.AMAZON_LWA_CLIENT_ID, clientSecret: config.AMAZON_LWA_CLIENT_SECRET, draft: config.AMAZON_SPAPI_DRAFT };
 }

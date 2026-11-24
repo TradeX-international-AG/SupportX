@@ -13,5 +13,6 @@ MARK=".deployed-commit"
 [ -f "$MARK" ] && [ "$(cat "$MARK")" = "$TARGET" ] && [ "$(git rev-parse HEAD)" = "$TARGET" ] && exit 0
 echo "SupportX-Update auf $TARGET"
 git reset -q --hard "$TARGET"
-docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d --build
+# Behind an existing proxy: SUPPORTX_COMPOSE_FILE=deploy/docker-compose.shared-proxy.yml
+docker compose -f "${SUPPORTX_COMPOSE_FILE:-deploy/docker-compose.prod.yml}" --env-file .env up -d --build
 echo "$TARGET" > "$MARK"

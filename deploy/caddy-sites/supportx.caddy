@@ -1,0 +1,12 @@
+# Site file for a Caddy that imports per-service files (e.g. /etc/caddy/sites/*.caddy)
+# and shares the docker network of deploy/docker-compose.shared-proxy.yml.
+# Replace the domain. If the proxy already has a block for this domain, put the
+# `handle` below into that block instead: one domain may only be defined once.
+support.example.com {
+	encode zstd gzip
+	# Amazon/eBay OAuth redirects carry single-use codes in the query; keep it out of logs.
+	log_skip /oauth/*
+	handle {
+		reverse_proxy supportx-server:3000
+	}
+}

@@ -2,6 +2,7 @@ import { AMAZON_MARKETPLACES, amazonMarketplace, maskIdentifier, type AmazonRegi
 import { AmazonListingsClient, type ListingInfo } from "../connectors/amazon/listings.ts";
 import { HttpError } from "../connectors/http.ts";
 import { AmazonRefundsClient } from "../connectors/amazon/refunds.ts";
+import { operatorAmazonApp } from "../storage/config.ts";
 import { many, one, withTx, type Queryable } from "../storage/db.ts";
 import { audit } from "./audit.ts";
 import { parseSecret } from "./connections.ts";
@@ -29,7 +30,7 @@ export interface AmazonConnectionRow {
   refunds_enabled: boolean;
 }
 
-interface AmazonSecret {
+export interface AmazonSecret {
   clientSecret: string;
   refreshToken: string;
 }
@@ -67,10 +68,13 @@ async function clientFor(ctx: AppContext, q: Queryable, row: AmazonConnectionRow
 /** What the settings page may see: identifiers masked, secrets only as "hinterlegt". */
 export async function getAmazonListingSettings(ctx: AppContext, actor: Actor) {
   const row = await loadConnection(ctx.db, actor.workspaceId);
-  if (!row) return { configured: false as const, marketplaces: AMAZON_MARKETPLACES };
+  // "Mit Amazon verbinden" needs the operator's app in the server's .env.
+  const oauthAvailable = operatorAmazonApp(ctx.config) !== null;
+  if (!row) return { configured: false as const, marketplaces: AMAZON_MARKETPLACES, oauthAvailable };
   return {
     configured: true as const,
     marketplaces: AMAZON_MARKETPLACES,
+    oauthAvailable,
     region: row.region,
     sellerIdHint: maskIdentifier(row.seller_id),
     clientIdHint: maskIdentifier(row.client_id),
@@ -94,6 +98,19 @@ export interface AmazonConnectionInput {
   tokenUrl?: string;
 }
 
+/** Region and marketplaces as chosen in the form; every marketplace must belong to the region. */
+export function checkedMarketplaces(region: string | undefined, ids: ReadonlyArray<string>): string[] {
+  if (!region || !["eu", "na", "fe"].includes(region)) throw new ServiceError(400, "INVALID", "Bitte die Amazon-Region wählen.");
+  const marketplaceIds = [...new Set(ids.map((m) => m.trim()).filter(Boolean))];
+  if (marketplaceIds.length === 0) throw new ServiceError(400, "INVALID", "Bitte mindestens einen Marktplatz wählen.");
+  for (const id of marketplaceIds) {
+    const m = amazonMarketplace(id);
+    if (!m) throw new ServiceError(400, "INVALID", `Unbekannter Amazon-Marktplatz: ${id}`);
+    if (m.region !== region) throw new ServiceError(400, "INVALID", `${m.label} gehört nicht zur gewählten Region.`);
+  }
+  return marketplaceIds;
+}
+
 /**
  * Create or change the access. On a change, fields left empty keep their stored
  * value, so a person can e.g. replace only the refresh token.
@@ -103,15 +120,8 @@ export async function saveAmazonListingConnection(ctx: AppContext, actor: Actor,
   const t = (v?: string) => v?.trim() || undefined;
   await withTx(ctx.db, async (tx) => {
     const existing = await loadConnection(tx, actor.workspaceId);
-    const region = (t(input.region) ?? existing?.region) as AmazonRegion | undefined;
-    if (!region || !["eu", "na", "fe"].includes(region)) throw new ServiceError(400, "INVALID", "Bitte die Amazon-Region wählen.");
-    const marketplaceIds = input.marketplaceIds ? [...new Set(input.marketplaceIds.map((m) => m.trim()).filter(Boolean))] : existing?.marketplace_ids ?? [];
-    if (marketplaceIds.length === 0) throw new ServiceError(400, "INVALID", "Bitte mindestens einen Marktplatz wählen.");
-    for (const id of marketplaceIds) {
-      const m = amazonMarketplace(id);
-      if (!m) throw new ServiceError(400, "INVALID", `Unbekannter Amazon-Marktplatz: ${id}`);
-      if (m.region !== region) throw new ServiceError(400, "INVALID", `${m.label} gehört nicht zur gewählten Region.`);
-    }
+    const region = (t(input.region) ?? existing?.region) as AmazonRegion;
+    const marketplaceIds = checkedMarketplaces(region, input.marketplaceIds ?? existing?.marketplace_ids ?? []);
     const sellerId = t(input.sellerId) ?? existing?.seller_id;
     const clientId = t(input.clientId) ?? existing?.client_id;
     const old = existing ? parseSecret<AmazonSecret>(await ctx.secrets.read(tx, actor.workspaceId, existing.secret_id), "Amazon") : null;
@@ -130,19 +140,35 @@ export async function saveAmazonListingConnection(ctx: AppContext, actor: Actor,
     } catch (error) {
       throw new ServiceError(400, "INVALID", (error as Error).message);
     }
-    const secretChanged = !old || clientSecret !== old.clientSecret || refreshToken !== old.refreshToken;
-    const secretId = secretChanged ? await ctx.secrets.store(tx, actor.workspaceId, "amazon_sp_api", JSON.stringify({ clientSecret, refreshToken } satisfies AmazonSecret)) : existing!.secret_id;
-    await tx.query(
-      `INSERT INTO amazon_listing_connections (workspace_id, region, seller_id, marketplace_ids, client_id, secret_id, api_base_url, token_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (workspace_id) DO UPDATE SET region = EXCLUDED.region, seller_id = EXCLUDED.seller_id, marketplace_ids = EXCLUDED.marketplace_ids,
-         client_id = EXCLUDED.client_id, secret_id = EXCLUDED.secret_id, api_base_url = EXCLUDED.api_base_url, token_url = EXCLUDED.token_url,
-         status = 'configured', last_error = NULL, updated_at = now()`,
-      [actor.workspaceId, region, sellerId, marketplaceIds, clientId, secretId, apiBaseUrl, tokenUrl],
-    );
-    if (existing && secretChanged) await tx.query("DELETE FROM secrets WHERE workspace_id = $1 AND id = $2", [actor.workspaceId, existing.secret_id]);
-    await audit(tx, actor, existing ? "amazon_listings.changed" : "amazon_listings.connected", "workspace", actor.workspaceId, { region, marketplaceIds, secretReplaced: !!existing && secretChanged });
+    await writeAmazonConnection(ctx, tx, actor, existing, old, { region, sellerId, marketplaceIds, clientId, clientSecret, refreshToken, apiBaseUrl, tokenUrl });
   });
+}
+
+/**
+ * Insert or replace the workspace's access. Shared by the form above and the
+ * "Mit Amazon verbinden" consent; secrets stored encrypted, the old one removed.
+ */
+export async function writeAmazonConnection(
+  ctx: AppContext,
+  tx: Queryable,
+  actor: Actor,
+  existing: AmazonConnectionRow | null,
+  old: AmazonSecret | null,
+  v: { region: AmazonRegion; sellerId: string; marketplaceIds: string[]; clientId: string; clientSecret: string; refreshToken: string; apiBaseUrl: string | null; tokenUrl: string | null },
+  via: "form" | "consent" = "form",
+): Promise<void> {
+  const secretChanged = !old || v.clientSecret !== old.clientSecret || v.refreshToken !== old.refreshToken;
+  const secretId = secretChanged ? await ctx.secrets.store(tx, actor.workspaceId, "amazon_sp_api", JSON.stringify({ clientSecret: v.clientSecret, refreshToken: v.refreshToken } satisfies AmazonSecret)) : existing!.secret_id;
+  await tx.query(
+    `INSERT INTO amazon_listing_connections (workspace_id, region, seller_id, marketplace_ids, client_id, secret_id, api_base_url, token_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (workspace_id) DO UPDATE SET region = EXCLUDED.region, seller_id = EXCLUDED.seller_id, marketplace_ids = EXCLUDED.marketplace_ids,
+       client_id = EXCLUDED.client_id, secret_id = EXCLUDED.secret_id, api_base_url = EXCLUDED.api_base_url, token_url = EXCLUDED.token_url,
+       status = 'configured', last_error = NULL, updated_at = now()`,
+    [actor.workspaceId, v.region, v.sellerId, v.marketplaceIds, v.clientId, secretId, v.apiBaseUrl, v.tokenUrl],
+  );
+  if (existing && secretChanged) await tx.query("DELETE FROM secrets WHERE workspace_id = $1 AND id = $2", [actor.workspaceId, existing.secret_id]);
+  await audit(tx, actor, existing ? "amazon_listings.changed" : "amazon_listings.connected", "workspace", actor.workspaceId, { region: v.region, marketplaceIds: v.marketplaceIds, secretReplaced: !!existing && secretChanged, via });
 }
 
 /** Owner switches refunds from the case on or off. Off by default. */

@@ -38,7 +38,7 @@ export interface Harness {
   close(): Promise<void>;
 }
 
-export async function createHarness(opts: { sendMode?: "drafts_only" | "enabled"; graphTimeoutMs?: number; mailbox?: string } = {}): Promise<Harness> {
+export async function createHarness(opts: { sendMode?: "drafts_only" | "enabled"; graphTimeoutMs?: number; mailbox?: string; env?: Record<string, string> } = {}): Promise<Harness> {
   const db = await testDb();
   const config = loadConfig({
     DATABASE_URL: TEST_DATABASE_URL,
@@ -46,6 +46,7 @@ export async function createHarness(opts: { sendMode?: "drafts_only" | "enabled"
     ALLOW_TEST_ENDPOINTS: "true",
     SEND_MODE: opts.sendMode ?? "drafts_only",
     AI_PROVIDER: "rules",
+    ...opts.env,
   });
   const weclapp = await startFakeWeclapp(demoWeclappData(), { token: DEMO.weclappToken });
   const graph = await startFakeGraph({ mailbox: opts.mailbox ?? DEMO.mailbox, clientSecret: DEMO.graphSecret, hangMs: 400 });
