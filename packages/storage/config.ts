@@ -39,6 +39,9 @@ const schema = z.object({
   AMAZON_SP_CLIENT_SECRET: z.string().trim().min(1).optional(),
   // true while the app is still a draft at Amazon (consent then carries version=beta).
   AMAZON_SP_APP_DRAFT: bool.default(false),
+  // Redirect URI as registered in the app, when it is a forwarding address that sends the
+  // browser on to ${PUBLIC_BASE_URL}/oauth/amazon/callback (query kept). Default: that callback.
+  AMAZON_SP_REDIRECT_URI: z.string().url().startsWith("https://").optional(),
 });
 
 export type AppConfig = z.infer<typeof schema>;

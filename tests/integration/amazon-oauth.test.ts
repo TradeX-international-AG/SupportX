@@ -106,6 +106,19 @@ describe("Bei Amazon anmelden (App der Installation)", () => {
     assert.equal((await amazonClientConfig(h.ctx, h.ctx.db, own)).clientSecret, "amzn1.oa2-cs.v1.own");
   });
 
+  it("uses a forwarding redirect URI from .env for the login step and the code exchange", async () => {
+    h = await createHarness();
+    const s = await seedWorkspace(h);
+    const forward = "https://support.example.com/oauth/amazon/callback";
+    Object.assign(h.ctx.config as unknown as Record<string, unknown>, OPERATOR, { AMAZON_SP_REDIRECT_URI: forward });
+    await startAmazonConsent(h.ctx, s.owner, { region: "eu", marketplaceIds: [DE] });
+    const back = new URL(await continueAmazonConsent(h.ctx, s.ownerUserId, { amazonCallbackUri: "https://sellercentral-europe.amazon.com/apps/authorize/confirm/x", amazonState: "amz" }));
+    assert.equal(back.searchParams.get("redirect_uri"), forward);
+    const seen: URLSearchParams[] = [];
+    await completeAmazonConsent(h.ctx, s.ownerUserId, { code: "c-2", state: back.searchParams.get("state")!, sellingPartnerId: SELLER }, fakeLwa(seen));
+    assert.equal(seen[0]!.get("redirect_uri"), forward);
+  });
+
   it("refuses an expired consent and a rejected code without storing anything", async () => {
     h = await createHarness();
     const s = await seedWorkspace(h);

@@ -28,7 +28,9 @@ const VALID_MS = 15 * 60_000;
 
 const hash = (state: string) => createHash("sha256").update(state).digest("hex");
 const base = (ctx: AppContext) => ctx.config.PUBLIC_BASE_URL.replace(/\/+$/, "");
-export const amazonRedirectUri = (ctx: AppContext) => `${base(ctx)}${AMAZON_CALLBACK_PATH}`;
+/** The redirect URI registered in the app: AMAZON_SP_REDIRECT_URI when the app points to a
+ * forwarding address (e.g. on the operator's own domain), else this installation's callback. */
+export const amazonRedirectUri = (ctx: AppContext) => ctx.config.AMAZON_SP_REDIRECT_URI ?? `${base(ctx)}${AMAZON_CALLBACK_PATH}`;
 
 function requireOperatorApp(ctx: AppContext) {
   const app = operatorAmazonApp(ctx.config);
