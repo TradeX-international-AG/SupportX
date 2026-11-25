@@ -2,7 +2,7 @@ import { DEMO, demoInboundMails, demoWeclappData } from "../packages/testing/dem
 import { startFakeGraph } from "../packages/testing/fake-graph.ts";
 import { startFakeWeclapp } from "../packages/testing/fake-weclapp.ts";
 import { startFakeAmazon } from "../packages/testing/fake-amazon.ts";
-import { startFakeDhl } from "../packages/testing/fake-dhl.ts";
+import { startFakeDhl, startFakeDhlReturns } from "../packages/testing/fake-dhl.ts";
 import { deflateSync } from "node:zlib";
 
 /** A plain coloured PNG (synthetic "customer photo" for the demo). */
@@ -20,7 +20,9 @@ function solidPng(width: number, height: number, [r, g, b]: [number, number, num
  * DEMO ONLY: local stand-ins for weclapp and Microsoft Graph with synthetic data.
  * The real adapters talk to these exactly as they would to the real services.
  */
-export const DEMO_PORTS = { weclapp: 4011, graph: 4012, amazon: 4013, dhl: 4014 };
+export const DEMO_PORTS = { weclapp: 4011, graph: 4012, amazon: 4013, dhl: 4014, dhlReturns: 4015 };
+/** Synthetic DHL business customer portal user of the demo (return label test double only). */
+export const DEMO_DHL_RETURNS = { user: "demo-retouren", password: "demo-passwort-nur-lokal", receiverGermany: "deu" };
 
 /** Synthetic DHL API key and parcel numbers of the demo (DHL test double only). */
 export const DEMO_DHL = { apiKey: "DemoDhlKey000000000000000000demo", parcels: ["00340434000000000101", "340434000102"] };
@@ -64,7 +66,8 @@ export async function startDemoFakes() {
       [DEMO_DHL.parcels[1]!]: { statusCode: "transit", status: "Die Sendung wurde im Ziel-Paketzentrum bearbeitet.", timestamp: day(5), city: "Radefeld" },
     },
   });
-  return { weclapp, graph, amazon, dhl };
+  const dhlReturns = await startFakeDhlReturns({ apiKey: DEMO_DHL.apiKey, user: DEMO_DHL_RETURNS.user, password: DEMO_DHL_RETURNS.password, port: DEMO_PORTS.dhlReturns });
+  return { weclapp, graph, amazon, dhl, dhlReturns };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

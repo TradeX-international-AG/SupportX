@@ -11,6 +11,7 @@ import { deadlineState } from "../../../packages/core/deadline.ts";
 import { formatKg, weightChecks, WEIGHT_SOURCE_NOTE } from "../../../packages/core/weight-check.ts";
 import { buildTimeline } from "../../../packages/core/timeline.ts";
 import { ParcelTrackingCard } from "./DhlTracking.tsx";
+import { ReturnLabelCard } from "./DhlReturns.tsx";
 import { MarketplaceOrderCard } from "./MarketplaceOrder.tsx";
 import { AmazonOfferCard, LISTING_STATE, listingActionText, type ListingAction } from "./AmazonOffer.tsx";
 import { AmazonRefundCard, type MarketplaceRefund } from "./AmazonRefund.tsx";
@@ -436,6 +437,8 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
           </section>
 
           <ParcelTrackingCard base={base} caseId={caseId} canEdit={canEdit} refreshKey={`${data.orderLink?.external_order_id ?? ""}|${data.orderLink?.retrieved_at ?? ""}|${(c.order_references ?? []).length}`} />
+
+          <ReturnLabelCard base={base} caseId={caseId} canEdit={canEdit} orderUnique={c.order_match_status === "unique"} onChanged={() => void load()} />
 
           <MarketplaceOrderCard base={base} caseId={caseId} platform={c.source_platform} refreshKey={`${data.orderLink?.external_order_id ?? ""}|${(c.order_references ?? []).length}`} />
 
@@ -1463,7 +1466,7 @@ function FollowUp({ value, onSet }: { value: string | null; onSet: (iso: string 
 
 const fmtSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-interface CaseFile { id: string; name: string; size: number; content_type: string; source: "upload" | "erp_invoice"; for_next_reply?: boolean }
+interface CaseFile { id: string; name: string; size: number; content_type: string; source: "upload" | "erp_invoice" | "return_label"; for_next_reply?: boolean }
 
 const MAX_FILE = 3 * 1024 * 1024;
 

@@ -5,6 +5,8 @@
  * recipients, credentials or send rights.
  */
 
+import type { ReturnAddress } from "./return-label.ts";
+
 /** Every persisted or executable object belongs to exactly one workspace. */
 export interface WorkspaceScope {
   workspaceId: string;
@@ -348,6 +350,8 @@ export interface OrderProvider {
   createCreditNoteDraft?(invoiceId: string, input: CreditNoteDraftInput): Promise<CreditNoteDraftResult>;
   /** What a caller must know about the order and where its invoices go (phone hotline). Read only, never stored. */
   callerCheck?(orderId: string): Promise<CallerCheckData>;
+  /** The customer's address for a return label (delivery address first). Read only, not stored with the case. */
+  returnAddress?(orderId: string): Promise<ReturnAddress | null>;
 }
 
 /** Order addresses for checking a caller; kept only for the duration of one tool call. */

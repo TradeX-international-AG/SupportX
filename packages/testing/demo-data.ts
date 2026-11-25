@@ -31,9 +31,9 @@ export function demoWeclappData(): FakeWeclappData {
         salesChannel: DEMO.channels.amazon, customerId: "cust-amz", tags: [],
         orderItems: [item("soi-1", 1, "Demo-Teekanne Glas 1,2 l", 1, 1, 0, "24.90"), item("soi-2", 2, "Demo-Teesieb Edelstahl", 2, 0, 0, "9.90")],
         grossAmount: "34.80", recordCurrencyId: "cur-eur", shippingCostItems: [],
-        // Addresses only for the phone hotline's caller check (never part of AI facts).
+        // Addresses only for the phone hotline's caller check and return labels (never part of AI facts).
         invoiceAddress: { firstName: "Erika", lastName: "Müller-Beispiel", zipcode: "10115", city: "Berlin" },
-        deliveryAddress: { firstName: "Erika", lastName: "Müller-Beispiel", zipcode: "10115", city: "Berlin" },
+        deliveryAddress: { firstName: "Erika", lastName: "Müller-Beispiel", street1: "Beispielweg 12a", zipcode: "10115", city: "Berlin", countryCode: "DE" },
         salesInvoiceEmailAddresses: { toAddresses: "kundin-demo@example.invalid" },
       },
       {

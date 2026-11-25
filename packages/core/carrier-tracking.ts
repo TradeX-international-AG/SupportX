@@ -56,7 +56,7 @@ export interface CarrierTrackingResult {
 export interface ParcelTarget {
   trackingNumber: string;
   /** "shipment": a parcel of a weclapp delivery; "customer": a number the customer wrote (often a return). */
-  origin: "shipment" | "customer";
+  origin: "shipment" | "customer" | "return_label";
   label: string;
   /** Recipient postal code from weclapp; DHL shows more details only with the right one. */
   postalCode?: string;
@@ -106,7 +106,7 @@ export const MAX_PARCELS_PER_CASE = 10;
  * The DHL parcel numbers of a case: every parcel of every weclapp delivery, then
  * parcel numbers the customer wrote (a return label number, for example), each once.
  */
-export function parcelTargets(order: OrderInput | null, customerNumbers: ReadonlyArray<string>): ParcelTarget[] {
+export function parcelTargets(order: OrderInput | null, customerNumbers: ReadonlyArray<string>, returnLabels: ReadonlyArray<string> = []): ParcelTarget[] {
   const out = new Map<string, ParcelTarget>();
   order?.shipments.forEach((s, i) => {
     s.parcels.forEach((p, k) => {
@@ -116,6 +116,11 @@ export function parcelTargets(order: OrderInput | null, customerNumbers: Readonl
       if (!out.has(n)) out.set(n, { trackingNumber: n, origin: "shipment", label: s.parcels.length > 1 ? `${name}, Paket ${k + 1}` : name, postalCode: s.recipientPostalCode });
     });
   });
+  // Return labels made in SupportX: DHL by definition.
+  for (const raw of returnLabels) {
+    const n = normalizeTrackingNumber(raw);
+    if (n && !out.has(n)) out.set(n, { trackingNumber: n, origin: "return_label", label: "Retourenlabel aus SupportX" });
+  }
   for (const raw of customerNumbers) {
     const n = normalizeTrackingNumber(raw);
     if (!isDhlCandidate(n) || out.has(n)) continue;

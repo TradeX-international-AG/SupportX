@@ -65,6 +65,8 @@ export function describeErrorBody(text: string, headers?: Headers): string {
       error?: { message?: string; code?: string; innerError?: { code?: string; "request-id"?: string; date?: string }; innererror?: { code?: string; "request-id"?: string } } | string;
       message?: string;
       errors?: unknown;
+      detail?: unknown;
+      title?: unknown;
     };
     if (typeof parsed.error === "string") message = parsed.error;
     else if (parsed.error) {
@@ -75,6 +77,9 @@ export function describeErrorBody(text: string, headers?: Headers): string {
       requestId = inner?.["request-id"] ?? "";
     }
     if (!message && typeof parsed.message === "string") message = parsed.message;
+    // Problem details (RFC 7807, e.g. DHL): { status, title, detail }.
+    if (!message && typeof parsed.detail === "string") message = parsed.detail;
+    if (!message && typeof parsed.title === "string") message = parsed.title;
     // Validation errors often list the offending fields separately (e.g. Kaufland: errors[]).
     const fields = Array.isArray(parsed.errors)
       ? parsed.errors.map((e) => (typeof e === "string" ? e : [e?.property ?? e?.field ?? e?.path, e?.message].filter((v) => typeof v === "string" && v).join(": "))).filter(Boolean).slice(0, 3)

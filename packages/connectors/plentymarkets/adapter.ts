@@ -1,3 +1,4 @@
+import { addressNames, countryAlpha2, splitStreet, type ReturnAddress } from "../../core/return-label.ts";
 import { createHash } from "node:crypto";
 import type {
   InvoiceFact,
@@ -48,6 +49,45 @@ const PROPERTY_EXTERNAL_ORDER_ID = 7;
 /** Order item type 6: shipping costs. */
 const ITEM_TYPE_SHIPPING = 6;
 const ORDER_RELATIONS = ["relations", "documents", "shippingPackages", "tags"];
+
+/** plenty country ids (system list) → ISO alpha-2, for the EU countries a return label can come from. */
+const PLENTY_COUNTRIES: Record<number, string> = { 1: "DE", 2: "AT", 3: "BE", 5: "CY", 6: "CZ", 7: "DK", 8: "ES", 9: "EE", 10: "FR", 11: "FI", 13: "GR", 14: "HU", 15: "IT", 16: "IE", 17: "LU", 18: "LV", 19: "MT", 21: "NL", 22: "PT", 23: "PL", 24: "SE" };
+
+/**
+ * The customer's address for a return label from GET /rest/orders/{id}?with[]=addresses:
+ * the delivery address (addressRelations typeId 2), else the invoice address (typeId 1).
+ * plenty fields: name1 company, name2 first name, name3 last name, name4 c/o,
+ * address1 street, address2 house number, address3 extra line, postalCode, town, countryId.
+ */
+export function mapPlentyReturnAddress(order: Json): ReturnAddress | null {
+  const addresses = Array.isArray(order.addresses) ? (order.addresses as Json[]) : [];
+  const relations = Array.isArray(order.addressRelations) ? (order.addressRelations as Json[]) : [];
+  const byType = (type: number) => {
+    const rel = relations.find((r) => num(r.typeId) === type);
+    return rel ? addresses.find((a) => str(a.id) === str(rel.addressId)) : undefined;
+  };
+  for (const a of [byType(2), byType(1), ...addresses]) {
+    if (!a) continue;
+    const street1 = str(a.address1)?.trim();
+    const city = str(a.town)?.trim();
+    if (!street1 || !city) continue;
+    const names = addressNames({ company: str(a.name1), firstName: str(a.name2), lastName: str(a.name3) });
+    const split = str(a.address2)?.trim() ? { street: street1, houseNumber: str(a.address2)!.trim() } : splitStreet(street1);
+    const extra = [str(a.name4) ? `c/o ${str(a.name4)}` : undefined, str(a.address3)].filter(Boolean).join(", ");
+    const countryId = num(a.countryId);
+    return {
+      name1: names.name1 ?? "",
+      ...(names.name2 ? { name2: names.name2 } : {}),
+      street: split.street,
+      ...(split.houseNumber ? { houseNumber: split.houseNumber } : {}),
+      ...(extra ? { addressExtra: extra } : {}),
+      postalCode: str(a.postalCode)?.trim() ?? "",
+      city,
+      countryCode: (countryId !== undefined ? PLENTY_COUNTRIES[countryId] : undefined) ?? countryAlpha2(str(a.countryIso2) ?? str(a.country)) ?? "",
+    };
+  }
+  return null;
+}
 
 /** Official plenty hosts. A merchant's own shop domain is not accepted (credentials go there). */
 const OFFICIAL_SUFFIXES = [".plentymarkets-cloud01.com", ".plentymarkets-cloud02.com", ".plentymarkets-cloud-de.com", ".plentymarkets-cloud-ie.com", ".plentysystems.com", ".plentyone.com"];
@@ -407,6 +447,14 @@ export class PlentyOrderProvider implements OrderProvider {
     } catch (error) {
       return toLookupError(error);
     }
+  }
+
+  /** GET only: the order's delivery address for a return label. */
+  async returnAddress(orderId: string): Promise<ReturnAddress | null> {
+    if (!/^\d{1,12}$/.test(orderId)) throw new Error("Ungültige Auftrags-ID.");
+    const body = await this.#get(`orders/${encodeURIComponent(orderId)}`, [["with[]", "addresses"]]);
+    if (!body || typeof body !== "object") throw new Error("Auftrag nicht gefunden.");
+    return mapPlentyReturnAddress(body as Json);
   }
 
   async checkAccess(): Promise<{ ok: boolean; detail: string }> {

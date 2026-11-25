@@ -31,7 +31,7 @@ export interface CaseFileInfo {
   name: string;
   size: number;
   content_type: string;
-  source: "upload" | "erp_invoice";
+  source: "upload" | "erp_invoice" | "return_label";
   for_next_reply: boolean;
   created_at: Date;
 }
@@ -164,7 +164,7 @@ export async function storeCaseFile(
   tx: Tx,
   actor: Actor,
   conversationId: string,
-  file: { name: string; contentType: string; data: Buffer; source: "upload" | "erp_invoice"; externalRef?: string; forNextReply?: boolean },
+  file: { name: string; contentType: string; data: Buffer; source: "upload" | "erp_invoice" | "return_label"; externalRef?: string; forNextReply?: boolean },
 ): Promise<CaseFileInfo> {
   const row = await one<CaseFileInfo>(
     tx,
@@ -172,7 +172,7 @@ export async function storeCaseFile(
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, name, size, content_type, source, for_next_reply, created_at`,
     [actor.workspaceId, conversationId, file.source, file.externalRef ?? null, file.name, file.contentType, file.data.length, createHash("sha256").update(file.data).digest("hex"), file.data, actorId(actor), file.forNextReply ?? false],
   );
-  await audit(tx, actor, file.source === "erp_invoice" ? "case_file.invoice_fetched" : "case_file.uploaded", "conversation", conversationId, { name: row!.name, size: row!.size });
+  await audit(tx, actor, file.source === "erp_invoice" ? "case_file.invoice_fetched" : file.source === "return_label" ? "case_file.return_label" : "case_file.uploaded", "conversation", conversationId, { name: row!.name, size: row!.size });
   return row!;
 }
 
@@ -337,4 +337,26 @@ export async function outboxAttachments(ctx: AppContext, workspaceId: string, id
   const rows = await many<{ id: string; name: string; content_type: string; data: Buffer }>(ctx.db, "SELECT id, name, content_type, data FROM documents WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [workspaceId, ids]);
   if (rows.length !== ids.length) throw new Error("Ein freigegebenes Dokument fehlt.");
   return ids.map((id) => rows.find((r) => r.id === id)!).map((r) => ({ name: r.name, contentType: r.content_type, data: r.data }));
+}
+
+/**
+ * Put case files that are already stored onto the open draft, or let them wait for the
+ * next reply. Call inside a transaction after lockCaseForFiles. Sends nothing.
+ */
+export async function attachStoredCaseFiles(tx: Tx, actor: Actor, conversationId: string, files: ReadonlyArray<CaseFileInfo>): Promise<{ draftId: string | null }> {
+  const ids = files.map((f) => f.id);
+  const open = await openDraftOf(tx, actor, conversationId);
+  if (open) {
+    const draft = await lockDraft(tx, actor, open.id, open.version);
+    const wanted = [...new Set([...draft.document_ids, ...ids])];
+    if (wanted.length > MAX_REPLY_DOCUMENTS) throw new ServiceError(400, "TOO_MANY", `Höchstens ${MAX_REPLY_DOCUMENTS} Anhänge je Antwort.`);
+    if (wanted.length !== draft.document_ids.length) await applyDraftDocuments(tx, actor, open.id, wanted, open.version, draft);
+    return { draftId: open.id };
+  }
+  const fresh = files.filter((f) => !f.for_next_reply);
+  if (fresh.length) {
+    await checkWaitingRoom(tx, actor, conversationId, fresh.reduce((sum, f) => sum + f.size, 0), fresh.length);
+    await tx.query("UPDATE documents SET for_next_reply = true WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [actor.workspaceId, fresh.map((f) => f.id)]);
+  }
+  return { draftId: null };
 }

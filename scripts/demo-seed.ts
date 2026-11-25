@@ -8,9 +8,10 @@ import { addRoutingRule, createGraphConnection, createMerchantAccount, upsertWec
 import type { Actor } from "../packages/services/context.ts";
 import { purgeWorkspace } from "../packages/services/purge.ts";
 import { DEMO } from "../packages/testing/demo-data.ts";
-import { DEMO_AMAZON, DEMO_DHL, DEMO_PORTS } from "./demo-fakes.ts";
+import { DEMO_AMAZON, DEMO_DHL, DEMO_DHL_RETURNS, DEMO_PORTS } from "./demo-fakes.ts";
 import { saveAmazonListingConnection } from "../packages/services/amazon-listings.ts";
 import { saveDhlConnection } from "../packages/services/dhl-tracking.ts";
+import { saveDhlReturnConnection } from "../packages/services/dhl-returns.ts";
 
 /**
  * DEMO ONLY. Creates a clearly labelled workspace with synthetic accounts and
@@ -79,6 +80,7 @@ export async function seedDemo(opts: { reset?: boolean; log?: (line: string) => 
       apiBaseUrl: `http://127.0.0.1:${DEMO_PORTS.amazon}`, tokenUrl: `http://127.0.0.1:${DEMO_PORTS.amazon}/auth/o2/token`,
     });
     await saveDhlConnection(ctx, owner, { apiKey: DEMO_DHL.apiKey, apiUrl: `http://127.0.0.1:${DEMO_PORTS.dhl}/track/shipments` });
+    await saveDhlReturnConnection(ctx, owner, { user: DEMO_DHL_RETURNS.user, password: DEMO_DHL_RETURNS.password, useTrackingKey: true, receiverGermany: DEMO_DHL_RETURNS.receiverGermany, apiUrl: `http://127.0.0.1:${DEMO_PORTS.dhlReturns}/parcel/de/shipping/returns/v1` });
     // Demo only: refunds from the case switched on (synthetic Amazon test double).
     await ctx.db.query("UPDATE amazon_listing_connections SET refunds_enabled = true WHERE workspace_id = $1", [workspaceId]);
     await ctx.db.query("UPDATE erp_connections SET credit_notes_enabled = true WHERE workspace_id = $1", [workspaceId]);

@@ -102,7 +102,8 @@ async function caseTargets(q: Queryable, workspaceId: string, conversationId: st
   const link = await one<{ snapshot: OrderRecord | null }>(q, "SELECT snapshot FROM order_links WHERE workspace_id = $1 AND conversation_id = $2 AND is_current AND status = 'unique'", [workspaceId, conversationId]);
   const refs = Array.isArray(conv.order_references) ? (conv.order_references as Array<{ value?: unknown; kind?: unknown }>) : [];
   const customer = refs.filter((r) => r.kind === "tracking_number" && typeof r.value === "string").map((r) => r.value as string);
-  return parcelTargets(link?.snapshot ?? null, customer);
+  const labels = await many<{ shipment_no: string }>(q, "SELECT shipment_no FROM return_labels WHERE workspace_id = $1 AND conversation_id = $2 AND carrier = 'dhl' AND NOT sandbox ORDER BY created_at", [workspaceId, conversationId]);
+  return parcelTargets(link?.snapshot ?? null, customer, labels.map((l) => l.shipment_no));
 }
 
 async function storedResults(q: Queryable, workspaceId: string, numbers: ReadonlyArray<string>): Promise<Map<string, CarrierTrackingResult>> {

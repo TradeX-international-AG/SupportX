@@ -48,6 +48,7 @@ import { deleteLogo, getLogo, logoVersion, previewDesign, resetDesign, saveDesig
 import { writeDesignMd, type WorkspaceTheme } from "../../packages/core/design-md.ts";
 import { caseMarketplaceOrderInfo, checkOttoConnection, deleteOttoConnection, getOttoSettings, lookupCaseMarketplaceOrder, saveOttoConnection } from "../../packages/services/marketplace-orders.ts";
 import { checkDhlConnection, deleteDhlConnection, getDhlSettings, saveDhlConnection, trackCaseParcels } from "../../packages/services/dhl-tracking.ts";
+import { attachReturnLabel, caseReturnLabels, checkDhlReturnConnection, createReturnLabel, deleteDhlReturnConnection, getDhlReturnSettings, previewReturnLabel, saveDhlReturnConnection } from "../../packages/services/dhl-returns.ts";
 import { createPhoneToken, deletePhoneConnection, getPhoneSettings, handlePhoneWebhook, phoneInvoiceRequest, phoneOrderStatus, savePhoneSettings, workspaceForToolToken } from "../../packages/services/phone.ts";
 import { AMAZON_CALLBACK_PATH, AMAZON_LOGIN_PATH, completeAmazonConsent, continueAmazonConsent, startAmazonConsent } from "../../packages/services/amazon-oauth.ts";
 import { checkAmazonListingConnection, closeAmazonOffer, deleteAmazonListingConnection, getAmazonListingSettings, lookupAmazonListing, saveAmazonListingConnection, setAmazonRefundsEnabled } from "../../packages/services/amazon-listings.ts";
@@ -337,6 +338,23 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     const body = parse(z.object({ force: z.boolean().optional() }), req.body ?? {});
     return trackCaseParcels(ctx, await actor(req), (req.params as { id: string }).id, body);
   });
+  // DHL return label: GET lists the labels, preview reads the address from the ERP, POST makes one label at DHL (click + confirmation only).
+  app.get("/api/w/:ws/cases/:id/return-labels", async (req) => caseReturnLabels(ctx, await actor(req), (req.params as { id: string }).id));
+  app.post("/api/w/:ws/cases/:id/return-labels/preview", async (req) => previewReturnLabel(ctx, await actor(req), (req.params as { id: string }).id));
+  app.post("/api/w/:ws/cases/:id/return-labels", async (req) => {
+    const text = (max: number) => z.string().max(max);
+    const body = parse(z.object({
+      confirm: z.literal(true),
+      attach: z.boolean(),
+      again: z.boolean().optional(),
+      address: z.object({ name1: text(100), name2: text(100).optional(), street: text(100), houseNumber: text(20).optional(), addressExtra: text(100).optional(), postalCode: text(20), city: text(80), countryCode: text(3) }),
+    }), req.body);
+    return createReturnLabel(ctx, await actor(req), (req.params as { id: string }).id, body);
+  });
+  app.post("/api/w/:ws/cases/:id/return-labels/:labelId/attach", async (req) => {
+    const p = req.params as { id: string; labelId: string };
+    return attachReturnLabel(ctx, await actor(req), p.id, p.labelId);
+  });
   // "Beim Marktplatz nachsehen": GET only says what can be asked; POST reads the order live (click only).
   app.get("/api/w/:ws/cases/:id/marketplace-order", async (req) => caseMarketplaceOrderInfo(ctx, await actor(req), (req.params as { id: string }).id));
   app.post("/api/w/:ws/cases/:id/marketplace-order", async (req) => {
@@ -604,6 +622,21 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     return { ok: true };
   });
   app.post("/api/w/:ws/dhl-tracking/check", async (req) => checkDhlConnection(ctx, await actor(req)));
+  // DHL return labels (owner). User, password, key and receiver IDs are never returned.
+  app.get("/api/w/:ws/dhl-returns", async (req) => getDhlReturnSettings(ctx, await actor(req)));
+  app.put("/api/w/:ws/dhl-returns", async (req) => {
+    const body = parse(z.object({
+      user: z.string().max(100).optional(), password: z.string().max(200).optional(), apiKey: z.string().max(200).optional(), useTrackingKey: z.boolean(),
+      receiverGermany: z.string().max(40).optional(), receiverOthers: z.string().max(1000).optional(), sandbox: z.boolean().optional(), apiUrl: z.string().max(300).optional(),
+    }), req.body);
+    await saveDhlReturnConnection(ctx, await actor(req), body);
+    return { ok: true };
+  });
+  app.delete("/api/w/:ws/dhl-returns", async (req) => {
+    await deleteDhlReturnConnection(ctx, await actor(req));
+    return { ok: true };
+  });
+  app.post("/api/w/:ws/dhl-returns/check", async (req) => checkDhlReturnConnection(ctx, await actor(req)));
   // OTTO Market API (owner), read only for the order status in the case. The secret is never returned.
   app.get("/api/w/:ws/otto-api", async (req) => getOttoSettings(ctx, await actor(req)));
   app.put("/api/w/:ws/otto-api", async (req) => {

@@ -72,3 +72,68 @@ export async function startFakeDhl(opts: { apiKey: string; parcels?: Record<stri
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
+
+/**
+ * Local stand-in for DHL Parcel DE Returns (POST /parcel/de/shipping/returns/v1/orders),
+ * built from the shapes of the official SDK's fixtures: header dhl-api-key plus Basic
+ * auth (business customer portal user), body { receiverId, customerReference, shipper },
+ * 201 { sstatus, shipmentNo, label: { b64 }, routingCode }, problem JSON
+ * { status, title, detail } on errors. Synthetic data only.
+ */
+export interface FakeDhlReturns {
+  url: string;
+  orders: Array<{ receiverId: unknown; customerReference: unknown; shipper: Record<string, unknown>; labelType: string | null }>;
+  requests: number;
+  /** Next answer is held back this long (to test timeouts). */
+  delayMs: { value: number };
+  close(): Promise<void>;
+}
+
+export async function startFakeDhlReturns(opts: { apiKey: string; user: string; password: string; receiverIds?: string[]; port?: number }): Promise<FakeDhlReturns> {
+  const receivers = new Set(opts.receiverIds ?? ["deu"]);
+  const state = { orders: [] as FakeDhlReturns["orders"], requests: 0, delayMs: { value: 0 } };
+  let next = 1;
+  const server = createServer((req, res) => {
+    state.requests += 1;
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const send = (status: number, body: unknown) => {
+      const delay = state.delayMs.value;
+      setTimeout(() => {
+        if (res.destroyed) return;
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(body));
+      }, delay);
+    };
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      if (req.method !== "POST" || url.pathname !== "/parcel/de/shipping/returns/v1/orders") return send(404, { status: 404, title: "Not Found", detail: "Not Found" });
+      if (req.headers["dhl-api-key"] !== opts.apiKey) return send(401, { status: 401, title: "Unauthorized", detail: "Unauthorized for given resource." });
+      const basic = `Basic ${Buffer.from(`${opts.user}:${opts.password}`).toString("base64")}`;
+      if (req.headers.authorization !== basic) return send(401, { status: 401, title: "Unauthorized", detail: "Authentication failed: User not found or password invalid" });
+      let body: Record<string, unknown>;
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as Record<string, unknown>;
+      } catch {
+        return send(400, { status: 400, title: "Bad Request", detail: "Invalid JSON" });
+      }
+      const shipper = (body.shipper ?? null) as Record<string, unknown> | null;
+      if (!body.receiverId || !receivers.has(String(body.receiverId))) return send(400, { status: 400, title: "Bad Request", detail: "Receiver ID is invalid." });
+      if (!shipper || !shipper.name1 || !shipper.city || !shipper.postalCode) return send(400, { status: 400, title: "Bad Request", detail: "Shipper address is required." });
+      if (shipper.country === "DEU" && !/^\d{5}$/.test(String(shipper.postalCode))) return send(400, { status: 400, title: "Bad Request", detail: "Postal code is invalid. Please use 99999 format." });
+      state.orders.push({ receiverId: body.receiverId, customerReference: body.customerReference, shipper, labelType: url.searchParams.get("labelType") });
+      const shipmentNo = `99999${String(next++).padStart(7, "0")}`;
+      const pdf = Buffer.from(`%PDF-1.4\n% synthetic DHL return label ${shipmentNo}\n%%EOF\n`, "latin1").toString("base64");
+      send(201, { sstatus: { title: "Created", status: 201, detail: "Created" }, shipmentNo, label: { b64: pdf }, routingCode: `40321111111+99000${shipmentNo.slice(-7)}` });
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(opts.port ?? 0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/parcel/de/shipping/returns/v1`,
+    orders: state.orders,
+    get requests() { return state.requests; },
+    delayMs: state.delayMs,
+    close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
+  };
+}

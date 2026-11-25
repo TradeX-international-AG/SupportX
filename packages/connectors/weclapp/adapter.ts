@@ -15,6 +15,7 @@ import type {
   ShipmentFact,
 } from "../../core/contracts.ts";
 import { trackingHref } from "../../core/tracking.ts";
+import { addressNames, countryAlpha2, splitStreet, type ReturnAddress } from "../../core/return-label.ts";
 import { assertAllowedEndpoint, HttpError, requestBinary, requestJson } from "../http.ts";
 
 /**
@@ -316,6 +317,35 @@ export function mapCallerCheck(order: Json, shipments: Json[] = []): CallerCheck
   };
 }
 
+/**
+ * The customer's address for a return label: deliveryAddress, else invoiceAddress,
+ * else recordAddress (fields of weclapp's recordAddress: company, company2, firstName,
+ * lastName, street1, street2, zipcode, city, countryCode). null without street or city.
+ */
+export function mapReturnAddress(order: Json): ReturnAddress | null {
+  for (const key of ["deliveryAddress", "invoiceAddress", "recordAddress"]) {
+    const a = order[key];
+    if (!a || typeof a !== "object") continue;
+    const r = a as Json;
+    const street1 = str(r.street1);
+    const city = str(r.city);
+    if (!street1 || !city) continue;
+    const names = addressNames({ company: str(r.company), company2: str(r.company2), firstName: str(r.firstName), lastName: str(r.lastName) });
+    const { street, houseNumber } = splitStreet(street1);
+    return {
+      name1: names.name1 ?? "",
+      ...(names.name2 ? { name2: names.name2 } : {}),
+      street,
+      ...(houseNumber ? { houseNumber } : {}),
+      ...(str(r.street2) ? { addressExtra: str(r.street2) } : {}),
+      postalCode: str(r.zipcode) ?? "",
+      city,
+      countryCode: countryAlpha2(str(r.countryCode)) ?? "",
+    };
+  }
+  return null;
+}
+
 /** Sales channel names per weclapp tenant (key → name), see #salesChannelName. */
 const CHANNEL_NAMES = new Map<string, { until: number; names: Map<string, string> }>();
 
@@ -595,6 +625,13 @@ export class WeclappOrderProvider implements OrderProvider {
     if (!row) throw new Error("Auftrag nicht gefunden.");
     const shipments = await this.#get("shipment", { "mainSalesOrderId-eq": orderId, pageSize: "20" }).catch(() => [] as Json[]);
     return mapCallerCheck(row, shipments);
+  }
+
+  /** GET only: the customer's address for a return label. */
+  async returnAddress(orderId: string): Promise<ReturnAddress | null> {
+    const row = (await this.#get("salesOrder", { "id-eq": orderId, pageSize: "1" })).find((r) => String(r.id) === orderId);
+    if (!row) throw new Error("Auftrag nicht gefunden.");
+    return mapReturnAddress(row);
   }
 
   /** GET only: weclapp renders the latest invoice document; nothing is created or changed. */
