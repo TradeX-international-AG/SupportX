@@ -56,6 +56,12 @@ const WAITING_SINCE = `CASE WHEN c.status = 'open' AND c.category = 'support' TH
                OR EXISTS (SELECT 1 FROM jsonb_array_elements(oc.order_references) x, jsonb_array_elements(c.order_references) y WHERE x->>'value' = y->>'value'))),
          '-infinity'::timestamptz)
   ) END`;
+/**
+ * "Auftragsbenachrichtigungen" and "Werbung & Infos": only what is not done yet.
+ * "Alle erledigt" closes them; a new mail in the same thread opens the case again.
+ */
+const ORDERS_OPEN = `c.status <> 'closed' AND ${ORDER_NOTICE_SQL}`;
+const INFO_OPEN = `c.status <> 'closed' AND c.category = 'info' AND NOT ${ORDER_NOTICE_SQL}`;
 const REPLY_HOURS = "nullif((w.reply_deadlines->>c.source_platform)::int, 0)";
 /** Others who had the case open in the last 45 seconds (heartbeat every 15). */
 const PRESENCE_WINDOW = "interval '45 seconds'";
@@ -74,8 +80,8 @@ export async function listCases(ctx: AppContext, actor: Actor, filter: CaseFilte
     needs_attention: NEEDS_ATTENTION,
     waiting: "c.status = 'waiting' AND c.category = 'support'",
     closed: "c.status = 'closed' AND c.category = 'support'",
-    orders: ORDER_NOTICE_SQL,
-    info: `c.category = 'info' AND NOT ${ORDER_NOTICE_SQL}`,
+    orders: ORDERS_OPEN,
+    info: INFO_OPEN,
     all: "true",
   }[filter];
   // Open cases: the deadline that runs out first on top. "Wartet": the next follow-up first.
@@ -325,8 +331,8 @@ export async function caseCounts(ctx: AppContext, actor: Actor) {
     ctx.db,
     `SELECT count(*) FILTER (WHERE c.category = 'support' AND c.status = 'open')::int AS open,
             count(*) FILTER (WHERE ${NEEDS_ATTENTION})::int AS needs_attention,
-            count(*) FILTER (WHERE ${ORDER_NOTICE_SQL})::int AS orders,
-            count(*) FILTER (WHERE c.category = 'info' AND NOT ${ORDER_NOTICE_SQL})::int AS info
+            count(*) FILTER (WHERE ${ORDERS_OPEN})::int AS orders,
+            count(*) FILTER (WHERE ${INFO_OPEN})::int AS info
      FROM conversations c WHERE c.workspace_id = $1`,
     [actor.workspaceId],
   );
@@ -497,6 +503,30 @@ export async function setStatus(ctx: AppContext, actor: Actor, conversationId: s
     const res = await tx.query("UPDATE conversations SET status = $3, snooze_until = $4, updated_at = now() WHERE workspace_id = $1 AND id = $2", [actor.workspaceId, conversationId, status, until]);
     if (res.rowCount === 0) throw new ServiceError(404, "NOT_FOUND", "Fall nicht gefunden.");
     await audit(tx, actor, "conversation.status", "conversation", conversationId, until ? { status, snoozeUntil: until.toISOString() } : { status });
+  });
+}
+
+/**
+ * "Alle erledigt" in "Werbung & Infos" or "Auftragsbenachrichtigungen": every case of
+ * that tab that is not done yet. Only what had arrived when the list was shown
+ * (`upTo`), so a mail that came in meanwhile is not closed unseen.
+ */
+export async function closeAllInTab(ctx: AppContext, actor: Actor, filter: "info" | "orders", upTo: string): Promise<number> {
+  requireRole(actor, ["owner", "agent"]);
+  if (filter !== "info" && filter !== "orders") throw new ServiceError(400, "INVALID", "Nur für Werbung & Infos und Auftragsbenachrichtigungen.");
+  const until = new Date(upTo);
+  if (Number.isNaN(until.getTime())) throw new ServiceError(400, "INVALID", "Ungültiger Zeitpunkt.");
+  const where = filter === "info" ? INFO_OPEN : ORDERS_OPEN;
+  return withTx(ctx.db, async (tx) => {
+    const rows = await many<{ id: string }>(
+      tx,
+      `UPDATE conversations c SET status = 'closed', snooze_until = NULL, updated_at = now()
+        WHERE c.workspace_id = $1 AND ${where} AND (c.last_message_at IS NULL OR date_trunc('milliseconds', c.last_message_at) <= $2)
+        RETURNING c.id`,
+      [actor.workspaceId, until],
+    );
+    for (const r of rows) await audit(tx, actor, "conversation.status", "conversation", r.id, { status: "closed", bulk: filter });
+    return rows.length;
   });
 }
 

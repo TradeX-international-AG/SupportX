@@ -107,6 +107,28 @@ export function Inbox({ workspaceId, role, openCase }: { workspaceId: string; ro
       setError((err as Error).message);
     }
   }, [workspaceId, filter, query, topic]);
+  // "Alle erledigt" in "Werbung & Infos" and "Auftragsbenachrichtigungen".
+  const [closing, setClosing] = useState(false);
+  const [closedNote, setClosedNote] = useState<string | null>(null);
+  useEffect(() => setClosedNote(null), [filter]);
+  const closeAll = async (tab: "info" | "orders") => {
+    const total = counts?.[tab] ?? cases.length;
+    const name = tab === "info" ? "Werbung & Infos" : "Auftragsbenachrichtigungen";
+    if (!window.confirm(`Alle ${total === 1 ? "1 Fall" : `${total} Fälle`} unter „${name}“ auf Erledigt setzen?\n\nSie verschwinden aus dieser Liste und bleiben unter „Alle“ und in der Suche. Kommt im selben Verlauf eine neue Mail, ist der Fall wieder offen.`)) return;
+    // Only what was in the list: a mail that arrived meanwhile stays.
+    const upTo = cases.reduce((m, c) => (c.last_message_at && c.last_message_at > m ? c.last_message_at : m), "1970-01-01T00:00:00.000Z");
+    setClosing(true);
+    try {
+      const r = await api<{ closed: number }>("POST", `/api/w/${workspaceId}/cases/close-all`, { filter: tab, upTo });
+      setSelected(null);
+      await load();
+      setClosedNote(r.closed === 1 ? "1 Fall auf Erledigt gesetzt." : `${r.closed} Fälle auf Erledigt gesetzt.`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setClosing(false);
+    }
+  };
   const urgent = counts?.urgent ?? 0;
   const [notify, setNotify] = useState(() => {
     try { return localStorage.getItem("supportx.notifyDeadline") === "1" && typeof Notification !== "undefined" && Notification.permission === "granted"; } catch { return false; }
@@ -176,6 +198,12 @@ export function Inbox({ workspaceId, role, openCase }: { workspaceId: string; ro
         {query && <p className="muted small pad">{cases.length === 200 ? "Mehr als 200" : cases.length} {cases.length === 1 ? "Treffer" : "Treffer"} für „{query}“ in allen Fällen. <button className="link" onClick={() => setSearch("")}>Suche löschen</button></p>}
         {!query && filter === "orders" && <p className="muted small pad">Meldungen von Marktplätzen und Shops zu Aufträgen, zum Beispiel neue Bestellungen, Rückerstattungen und Rücksendungen. Sie bekommen keinen Antwortentwurf. Ist eine Kundenanfrage dabei, im Fall auf „Ist eine Kundenanfrage“ klicken.</p>}
         {!query && filter === "info" && <p className="muted small pad">Newsletter, Aktionen und Partner-Infos. Sie bekommen keinen Antwortentwurf. Ist eine Kundenanfrage dabei, im Fall auf „Ist eine Kundenanfrage“ klicken.</p>}
+        {!query && (filter === "info" || filter === "orders") && role !== "viewer" && (cases.length > 0 || closedNote) && (
+          <div className="close-all pad">
+            {cases.length > 0 && <button className="ghost" disabled={closing} onClick={() => void closeAll(filter)}>{closing ? "Wird erledigt …" : "Alle erledigt"}</button>}
+            {closedNote && <span className="small ok-text">{closedNote}</span>}
+          </div>
+        )}
         {error && <p className="error pad">{error}</p>}
         {cases.length === 0 && <p className="muted pad">{query ? "Nichts gefunden." : "Hier ist gerade nichts."}</p>}
         <ul>

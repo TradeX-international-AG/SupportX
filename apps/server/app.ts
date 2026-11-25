@@ -12,7 +12,7 @@ import { actorFor, changePassword, login, logout, userForSession, workspacesFor 
 import { deleteSnippet, listSnippets, saveSnippet } from "../../packages/services/snippets.ts";
 import { addTeamMember, listTeam, removeTeamMember, setTeamPassword, setTeamRole } from "../../packages/services/team.ts";
 import { setAutomation, setCaseTopic } from "../../packages/services/automation.ts";
-import { addNote, assign, caseCounts, checkWorkspaceAiKey, deleteCategoryRule, exportCasesCsv, getCase, getSettings, leavePresence, listCases, setCaseCategory, previewSubjectPattern, touchPresence, setOutcome, setStatus, setSetupConfirmation, setWorkspaceAiKey, updateWorkspaceSettings, type CaseFilter } from "../../packages/services/cases.ts";
+import { addNote, assign, closeAllInTab, caseCounts, checkWorkspaceAiKey, deleteCategoryRule, exportCasesCsv, getCase, getSettings, leavePresence, listCases, setCaseCategory, previewSubjectPattern, touchPresence, setOutcome, setStatus, setSetupConfirmation, setWorkspaceAiKey, updateWorkspaceSettings, type CaseFilter } from "../../packages/services/cases.ts";
 import {
   addRoutingRule,
   checkChannel,
@@ -257,6 +257,10 @@ export async function buildServer(ctx: AppContext, opts: { logger?: boolean; eba
     const body = parse(z.object({ status: z.string(), snoozeUntil: z.string().max(40).nullable().optional() }), req.body);
     await setStatus(ctx, await actor(req), (req.params as { id: string }).id, body.status, body.snoozeUntil);
     return { ok: true };
+  });
+  app.post("/api/w/:ws/cases/close-all", async (req) => {
+    const body = parse(z.object({ filter: z.enum(["info", "orders"]), upTo: z.string().max(40) }), req.body);
+    return { closed: await closeAllInTab(ctx, await actor(req), body.filter, body.upTo) };
   });
   app.post("/api/w/:ws/cases/:id/topic", async (req) => {
     await setCaseTopic(ctx, await actor(req), (req.params as { id: string }).id, parse(z.object({ topic: z.string().max(40).nullable() }), req.body).topic);

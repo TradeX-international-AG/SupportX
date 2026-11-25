@@ -297,6 +297,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; width: 1
 .report .settings-title h2 { margin: 0; }
 
 .deadline-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 0; }
+.close-all { display: flex; align-items: center; gap: 10px; padding-top: 0; }
+.ok-text { color: var(--ok); }
 .fetch-status { display: grid; gap: 2px; padding-top: 0; }
 .fetch-status .row { justify-content: space-between; gap: 8px; }
 .fetch-status .deadline { white-space: normal; }
