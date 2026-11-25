@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api.ts";
-import { sinceLabel } from "../../../packages/core/fetch-freshness.ts";
+import { needsAttention, sinceLabel } from "../../../packages/core/fetch-freshness.ts";
 
 export interface FetchState {
   id: string; kind: string; displayName: string; lastSyncAt: string | null;
@@ -8,10 +8,13 @@ export interface FetchState {
 }
 
 /**
- * One line per channel that needs attention in the inbox: Shop Apotheke (read
- * while the inbox is open, as Mirakl documents it) and any connection that has
- * not been read for hours. Reports "inbox on screen" to the server once a
- * minute while the tab is visible; the server decides whether a read is due.
+ * Reads run quietly: the worker reads every channel on a timer, and Mirakl
+ * marketplaces without background permission (Shop Apotheke …) are read here
+ * while the inbox is open, as Mirakl documents it. Reports "inbox on screen" to
+ * the server once a minute while the tab is visible; the server decides whether
+ * a read is due. A line appears only when something is wrong: the last read
+ * failed, or a timer-read channel has not been read for hours. A Mirakl channel
+ * that waited while nobody looked is read right away and never shown as stale.
  */
 export function FetchStatus({ workspaceId, canFetch, onFetched }: { workspaceId: string; canFetch: boolean; onFetched: () => void }) {
   const [states, setStates] = useState<FetchState[]>([]);
@@ -41,7 +44,7 @@ export function FetchStatus({ workspaceId, canFetch, onFetched }: { workspaceId:
     return () => clearTimeout(t);
   }, [states, report]);
 
-  const shown = states.filter((s) => s.stale || !s.background);
+  const shown = states.filter(needsAttention);
   if (shown.length === 0) return null;
   const fetchNow = async (id: string) => {
     setBusy(id);
@@ -51,12 +54,13 @@ export function FetchStatus({ workspaceId, canFetch, onFetched }: { workspaceId:
     <div className="fetch-status small pad">
       {shown.map((s) => (
         <div key={s.id} className="row">
-          {s.fetching ? <span className="muted">{s.displayName}: wird gerade abgerufen …</span>
-            : s.stale ? <span className="deadline bad" title="Neue Nachrichten von hier fehlen womöglich im Posteingang."><i aria-hidden="true" />{s.displayName} {s.lastSyncAt ? `seit ${sinceLabel(s.lastSyncAt).replace(/^vor /, "")} nicht abgerufen` : "noch nie abgerufen"}</span>
-            : <span className="muted" title="Wird automatisch abgerufen, sobald SupportX geöffnet wird, und danach alle 10 Min., solange der Posteingang offen ist. Rund um die Uhr erst nach Freigabe durch den Marktplatz.">{s.displayName}: abgerufen {sinceLabel(s.lastSyncAt)} · automatisch beim Öffnen</span>}
-          {canFetch && !s.fetching && <button className="link" disabled={busy === s.id} onClick={() => void fetchNow(s.id)}>Jetzt abrufen</button>}
+          {s.health === "error"
+            ? <span className="deadline bad" title="Der letzte Abruf ist fehlgeschlagen. SupportX versucht es automatisch erneut. Details unter Einstellungen."><i aria-hidden="true" />{s.displayName}: Abruf fehlgeschlagen</span>
+            : <span className="deadline bad" title="Neue Nachrichten von hier fehlen womöglich im Posteingang."><i aria-hidden="true" />{s.displayName} {s.lastSyncAt ? `seit ${sinceLabel(s.lastSyncAt).replace(/^vor /, "")} nicht abgerufen` : "noch nie abgerufen"}</span>}
+          {canFetch && <button className="link" disabled={busy === s.id} onClick={() => void fetchNow(s.id)}>Erneut versuchen</button>}
         </div>
       ))}
     </div>
   );
 }
+

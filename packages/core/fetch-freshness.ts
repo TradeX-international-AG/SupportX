@@ -25,3 +25,17 @@ export function sinceLabel(lastSyncAt: string | Date | null | undefined, now: Da
   if (hours < 48) return `vor ${hours} Std.`;
   return `vor ${Math.floor(hours / 24)} Tagen`;
 }
+
+/**
+ * Whether the inbox shows a line for a channel. Reads run quietly, so only
+ * problems get one: the last read failed, or a channel the worker reads on a
+ * timer has not been read for hours. Nothing while a read runs. A Mirakl
+ * channel read on display (no background permission) is old only because
+ * nobody looked; opening the inbox reads it right away, so its age alone is
+ * no problem.
+ */
+export function needsAttention(s: { fetching: boolean; health: string; stale: boolean; background: boolean }): boolean {
+  if (s.fetching) return false;
+  if (s.health === "error") return true;
+  return s.stale && s.background;
+}
