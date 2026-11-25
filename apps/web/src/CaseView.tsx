@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { orderLinks, type OrderLink } from "./order-links.ts";
 import { checkSubjectPattern, subjectPattern } from "../../../packages/core/subject-pattern.ts";
 import { api, fmtDate, MATCH_LABEL, OUTBOX_LABEL, PLATFORM_LABEL } from "./api.ts";
+import { PlatformIcon } from "./PlatformIcon.tsx";
 import { INTENT_LABEL } from "./Inbox.tsx";
 import { sendNotice, type SendInfo } from "./send-notice.ts";
 import { customerText, shortText } from "../../../packages/core/customer-text.ts";
@@ -262,7 +263,7 @@ export function CaseView({ workspaceId, caseId, role, onChanged, onOpenCase }: {
     <div className="case">
       <div className="case-head">
         <div>
-          <h2>{c.subject || "(ohne Betreff)"}</h2>
+          <h2 className="with-mark"><PlatformIcon source={c.source_platform} origin={origin?.platform} />{c.subject || "(ohne Betreff)"}</h2>
           <div className="meta small muted">
             {origin && origin.platform !== c.source_platform
               ? <span className="pill platform" title={`Herkunft: ${origin.detail}. Eingegangen per ${PLATFORM_LABEL[c.source_platform] ?? c.source_platform}.`}>{origin.label}{origin.via === "text" ? "?" : ""} · {PLATFORM_LABEL[c.source_platform] ?? c.source_platform}</span>

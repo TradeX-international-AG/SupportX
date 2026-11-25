@@ -132,7 +132,8 @@ export async function listCases(ctx: AppContext, actor: Actor, filter: CaseFilte
     }
     // Sales channel of the order, for the list (no customer text here: that only labels the opened case).
     const origin = detectOrigin({ sourcePlatform: row.source_platform as string, accountPlatform: row.merchant_account_platform as string | null, order });
-    return { ...row, refund, origin_label: origin && origin.platform !== row.source_platform ? origin.label : null };
+    const differs = origin && origin.platform !== row.source_platform;
+    return { ...row, refund, origin_label: differs ? origin.label : null, origin_platform: differs ? origin.platform : null };
   }));
 }
 

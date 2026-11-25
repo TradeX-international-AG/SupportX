@@ -3,6 +3,7 @@ import { api, fmtDate, MATCH_LABEL, OUTBOX_LABEL, PLATFORM_LABEL } from "./api.t
 import { BatchApprove } from "./BatchApprove.tsx";
 import { CaseView } from "./CaseView.tsx";
 import { FetchStatus } from "./FetchStatus.tsx";
+import { PlatformIcon } from "./PlatformIcon.tsx";
 import { deadlineState } from "../../../packages/core/deadline.ts";
 import { isOrderNotice } from "../../../packages/core/order-notice.ts";
 
@@ -17,6 +18,8 @@ interface CaseRow {
   source_platform: string;
   /** Sales channel of the order when it differs from the way the enquiry came in (e.g. "DocMorris" for an e-mail). */
   origin_label?: string | null;
+  /** Known platform behind origin_label (null when the channel is not one SupportX knows). */
+  origin_platform?: string | null;
   customer_address: string | null;
   customer_name: string | null;
   order_match_status: string;
@@ -213,6 +216,8 @@ export function Inbox({ workspaceId, role, openCase }: { workspaceId: string; ro
             const pickable = role !== "viewer" && c.category === "support" && c.status !== "closed" && (c.draft_status === "proposed" || c.draft_status === "edited");
             return (
               <li key={c.id} className={selected === c.id ? "case-item selected" : "case-item"} onClick={() => setSelected(c.id)}>
+                <PlatformIcon source={c.source_platform} origin={c.origin_platform} />
+                <div className="case-body">
                 <div className="row">
                   <span className="muted small ellipsis">{c.customer_name || c.customer_address}</span>
                   <span className="muted small nowrap">{fmtDate(c.last_message_at)}</span>
@@ -231,6 +236,7 @@ export function Inbox({ workspaceId, role, openCase }: { workspaceId: string; ro
                   {due && <span className={`deadline ${due.tone}`} title={`Antwort fällig bis ${fmtDate(due.dueAt.toISOString())} (${c.reply_hours} Std. ab der Kundennachricht)`}><i aria-hidden="true" />{due.label}</span>}
                 </div>
                 {c.open_by && <div className="small presence-line">Gerade offen bei {c.open_by}</div>}
+                </div>
               </li>
             );
           })}

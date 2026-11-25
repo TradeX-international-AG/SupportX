@@ -77,9 +77,10 @@ label.row { flex-direction: row; align-items: center; }
 .filters.dimmed { opacity: .55; }
 .chip { border-radius: var(--radius); min-height: 32px; padding: 0 12px; font-size: 13px; border-color: var(--line); }
 .chip:hover:not(:disabled) { border-color: var(--text); } .chip.active { background: var(--text); color: #fff; border-color: var(--text); }
-.case-item { padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.case-item { padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; gap: 12px; align-items: flex-start; }
+.case-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .case-item:hover { background: var(--bg); } .case-item.selected { background: var(--bg); box-shadow: inset 3px 0 0 var(--signal); }
-.case-item .row:first-child { justify-content: space-between; }
+.case-body .row:first-child { justify-content: space-between; }
 .subject { font-weight: 600; }
 .case-detail { flex: 1; overflow-y: auto; padding: 24px; }
 .case-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -155,7 +156,7 @@ button.ghost.danger { border-color: var(--bad-bg); }
 /* Inbox list: one status line per case instead of a row of badges. */
 .chip .count { margin-left: 6px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .chip.active .count { color: #fff; }
-.case-item .row:first-child { gap: 8px; }
+.case-body .row:first-child { gap: 8px; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .nowrap { white-space: nowrap; }
 .tag { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--graphite); }
@@ -397,3 +398,10 @@ button.pattern-choice code { font-family: var(--mono); font-size: 12px; color: v
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 .notice.writing { display: flex; align-items: flex-start; gap: 0; }
 .notice.writing .spinner { flex: none; margin-top: 0.2em; }
+
+/* Marketplace mark in front of every case (inbox list, case header). Monochrome on purpose: no brand colours or logos. */
+.platform-mark { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: .02em; line-height: 1; }
+.platform-mark.picto { color: var(--muted); }
+.platform-mark-via { position: absolute; right: -5px; bottom: -5px; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--muted); }
+.case-item.selected .platform-mark { border-color: var(--text); }
+.case-head h2.with-mark { display: flex; align-items: center; gap: 12px; }
