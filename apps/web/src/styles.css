@@ -371,8 +371,8 @@ a.button.refund-due:hover { background: var(--bad); border-color: var(--bad); }
 .close-case p { margin: 0; }
 .close-case-fields { align-items: flex-end; gap: 12px; }
 .close-case-fields .field input { min-width: 140px; }
-.close-case-fields .grow { flex: 1 1 260px; }
-.close-case-fields .grow input { width: 100%; }
+.close-case-note { width: 100%; }
+.close-case-note textarea { min-height: 72px; }
 .close-case .actions { margin-top: 0; }
 .chip.active:hover:not(:disabled) { background: var(--graphite); border-color: var(--graphite); color: #fff; }
 .outcome-details { display: flex; flex-direction: column; gap: 8px; margin: 0; }

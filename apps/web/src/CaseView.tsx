@@ -937,11 +937,10 @@ function CloseCase({ data, onClose, onCancel }: { data: CaseData; onClose: (outc
         <div className="row wrap close-case-fields">
           <label className="field"><span>Betrag in €</span><input inputMode="decimal" placeholder="z. B. 12,50" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus /></label>
           {full && <button type="button" className="small" onClick={() => { setOutcome("refund"); setAmount(full.text); }}>Voller Betrag ({full.label})</button>}
-          <label className="field grow"><span>Vermerk</span><input placeholder="z. B. 25 % für fehlende Packung, keine Retoure" value={note} onChange={(e) => setNote(e.target.value)} /></label>
         </div>
       )}
-      {!isRefund && outcome && (
-        <label className="field close-case-fields"><span>Vermerk (optional)</span><input value={note} onChange={(e) => setNote(e.target.value)} /></label>
+      {outcome && (
+        <label className="field close-case-note"><span>{isRefund ? "Vermerk" : "Vermerk (optional)"}</span><textarea rows={3} placeholder={isRefund ? "z. B. 25 % für fehlende Packung, keine Retoure" : "z. B. Ersatz mit DHL verschickt, Kunde informiert"} value={note} onChange={(e) => setNote(e.target.value)} /></label>
       )}
       <div className="row wrap actions">
         <button className="primary" type="submit">{isRefund ? "Erledigt, auf die Erstattungsliste" : "Erledigt"}</button>
